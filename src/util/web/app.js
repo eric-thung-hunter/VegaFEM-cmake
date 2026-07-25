@@ -76,11 +76,12 @@ function parseObjMesh(text) {
 }
 
 async function loadBridgeAssets() {
-  const [objResponse, modesResponse] = await Promise.all([
+  const [objResponse, modesResponse, cubicResponse] = await Promise.all([
     fetch('./assets/simpleBridge.obj'),
-    fetch('./assets/simpleBridge.URendering.float')
+    fetch('./assets/simpleBridge.URendering.float'),
+    fetch('./assets/simpleBridge.cub')
   ]);
-  if (!objResponse.ok || !modesResponse.ok) throw new Error('Unable to fetch the simpleBridge rendering assets.');
+  if (!objResponse.ok || !modesResponse.ok || !cubicResponse.ok) throw new Error('Unable to fetch the simpleBridge simulation assets.');
 
   const bridge = parseObjMesh(await objResponse.text());
   const buffer = await modesResponse.arrayBuffer();
@@ -92,7 +93,13 @@ async function loadBridgeAssets() {
   if (rows !== bridge.rest.length || expectedBytes !== buffer.byteLength) {
     throw new Error(`Modal matrix dimensions (${rows} × ${modes}) do not match the Bridge mesh.`);
   }
-  return { ...bridge, rows, modes, basis: new Float32Array(buffer, 8, rows * modes) };
+  return {
+    ...bridge,
+    rows,
+    modes,
+    basis: new Float32Array(buffer, 8, rows * modes),
+    cubicPolynomial: await cubicResponse.arrayBuffer()
+  };
 }
 
 function createBridge(scene, data) {
@@ -167,6 +174,12 @@ async function main() {
   const basisStatus = module._vegafem_web_set_modal_basis(simulation, basisPointer, bridge.rows, bridge.modes);
   module._free(basisPointer);
   if (basisStatus !== 0) throw new Error('The WebAssembly solver rejected the Bridge modal matrix.');
+
+  const polynomialPointer = module._malloc(bridge.cubicPolynomial.byteLength);
+  module.HEAPU8.set(new Uint8Array(bridge.cubicPolynomial), polynomialPointer);
+  const polynomialStatus = module._vegafem_web_set_stvk_cubic_polynomial(simulation, polynomialPointer, bridge.cubicPolynomial.byteLength);
+  module._free(polynomialPointer);
+  if (polynomialStatus !== 0) throw new Error('The WebAssembly solver rejected the Bridge StVK polynomial.');
 
   const displacementPointer = module._vegafem_web_deformed_positions(simulation);
   if (!displacementPointer) throw new Error('The WebAssembly solver could not assemble Bridge displacements.');

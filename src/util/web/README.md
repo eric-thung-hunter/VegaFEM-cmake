@@ -11,11 +11,12 @@ separate from the GLUT/ImGui native demo:
   renderer initialisation itself fails.
 
 The demo ships the native `simpleBridge.obj` mesh and its exact
-`simpleBridge.URendering.float` 48,255 x 20 rendering modal matrix. The Wasm
-core performs the same column-major `u = Uq` assembly used by the native
-`ModalMatrix` path, then Three.js renders the resulting Bridge geometry. The
-current reduced dynamics kernel is intentionally compact; the next porting
-step in `todo.md` is loading the production reduced-StVK force data.
+`simpleBridge.URendering.float` 48,255 x 20 rendering modal matrix, plus the
+precomputed `simpleBridge.cub` StVK polynomial. The Wasm core performs the
+same column-major `u = Uq` assembly and evaluates the same reduced internal
+force polynomial as the native demo; Three.js renders the resulting Bridge
+geometry. It uses a fixed-step semi-implicit integrator rather than the native
+implicit Newmark solver so the Safari path has no BLAS/LAPACK dependency.
 
 ## Build
 

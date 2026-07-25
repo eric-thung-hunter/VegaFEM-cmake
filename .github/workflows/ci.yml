@@ -164,6 +164,7 @@ jobs:
           test -s build-web/web/three.webgpu.js
           test -s build-web/web/assets/simpleBridge.obj
           test -s build-web/web/assets/simpleBridge.URendering.float
+          test -s build-web/web/assets/simpleBridge.cub
           grep -F "WebGL2 fallback" build-web/web/app.js
           grep -F "CPU Wasm solver" build-web/web/app.js
 

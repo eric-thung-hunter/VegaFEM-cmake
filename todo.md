@@ -7,8 +7,9 @@
   - Avoid POSIX-only assumptions in core, threading, filesystem, and build code.
 
 - [ ] Complete the browser reduced-StVK asset pipeline.
-  - Port the production reduced-StVK force data/integrator; the browser already
-    ships the production Bridge `.URendering.float` rendering modal matrix.
+  - Port native implicit Newmark integration and closest-vertex force
+    projection; the browser already evaluates the production reduced-StVK
+    polynomial and ships the Bridge `.URendering.float` rendering modal matrix.
   - Keep the default build non-threaded and fixed-memory for iOS Safari.
   - Add a separately deployed SIMD/pthread desktop build only after it is
     benchmarked; never make `SharedArrayBuffer` or COOP/COEP a requirement for

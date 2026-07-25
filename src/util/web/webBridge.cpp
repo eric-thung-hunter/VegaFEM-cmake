@@ -8,6 +8,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace
@@ -20,7 +22,13 @@ struct ReducedSimulation
   std::array<double, kModeCount> qdot{};
   std::vector<float> renderingBasis;
   std::vector<float> deformedPositions;
+  std::vector<double> linearCoefficients;
+  std::vector<double> quadraticCoefficients;
+  std::vector<double> cubicCoefficients;
+  std::array<double, kModeCount * (kModeCount + 1) / 2> qiqj{};
   int renderingRows = 0;
+  int quadraticSize = 0;
+  int cubicSize = 0;
   double externalForce = 0.0;
 
   void reset()
@@ -39,6 +47,85 @@ struct ReducedSimulation
     renderingBasis.assign(basis, basis + static_cast<std::size_t>(rows) * kModeCount);
     deformedPositions.assign(static_cast<std::size_t>(rows), 0.0f);
     return true;
+  }
+
+  bool setStVKCubicPolynomial(const unsigned char * data, int byteCount)
+  {
+    // VegaFEM .cub files are: r, linearSize, quadraticSize, cubicSize, then
+    // column-major double coefficient arrays. WebAssembly is little-endian,
+    // matching the existing little-endian VegaFEM assets.
+    if (data == nullptr || byteCount < 4 * static_cast<int>(sizeof(std::int32_t)))
+      return false;
+
+    std::int32_t header[4];
+    std::memcpy(header, data, sizeof(header));
+    const int modeCount = header[0];
+    const int fileLinearSize = header[1];
+    const int fileQuadraticSize = header[2];
+    const int fileCubicSize = header[3];
+    const int expectedQuadraticSize = static_cast<int>(kModeCount * (kModeCount + 1) / 2);
+    const int expectedCubicSize = static_cast<int>(kModeCount * (kModeCount + 1) * (kModeCount + 2) / 6);
+    if (modeCount != static_cast<int>(kModeCount) || fileLinearSize != modeCount ||
+        fileQuadraticSize != expectedQuadraticSize || fileCubicSize != expectedCubicSize)
+      return false;
+
+    const std::size_t coefficientCount = static_cast<std::size_t>(modeCount) *
+      static_cast<std::size_t>(fileLinearSize + fileQuadraticSize + fileCubicSize);
+    const std::size_t expectedBytes = sizeof(header) + coefficientCount * sizeof(double);
+    if (expectedBytes != static_cast<std::size_t>(byteCount))
+      return false;
+
+    const unsigned char * cursor = data + sizeof(header);
+    linearCoefficients.resize(static_cast<std::size_t>(modeCount) * fileLinearSize);
+    quadraticCoefficients.resize(static_cast<std::size_t>(modeCount) * fileQuadraticSize);
+    cubicCoefficients.resize(static_cast<std::size_t>(modeCount) * fileCubicSize);
+    std::memcpy(linearCoefficients.data(), cursor, linearCoefficients.size() * sizeof(double));
+    cursor += linearCoefficients.size() * sizeof(double);
+    std::memcpy(quadraticCoefficients.data(), cursor, quadraticCoefficients.size() * sizeof(double));
+    cursor += quadraticCoefficients.size() * sizeof(double);
+    std::memcpy(cubicCoefficients.data(), cursor, cubicCoefficients.size() * sizeof(double));
+    quadraticSize = fileQuadraticSize;
+    cubicSize = fileCubicSize;
+    return true;
+  }
+
+  void evaluateStVKInternalForces(std::array<double, kModeCount> & forces)
+  {
+    forces.fill(0.0);
+    if (linearCoefficients.empty())
+      return;
+
+    for (std::size_t output = 0; output < kModeCount; ++output)
+      for (std::size_t input = 0; input < kModeCount; ++input)
+        forces[output] += linearCoefficients[output * kModeCount + input] * q[input];
+
+    std::size_t qiqjIndex = 0;
+    for (std::size_t i = 0; i < kModeCount; ++i)
+      for (std::size_t j = i; j < kModeCount; ++j)
+        qiqj[qiqjIndex++] = q[i] * q[j];
+
+    for (std::size_t output = 0; output < kModeCount; ++output)
+      for (int index = 0; index < quadraticSize; ++index)
+        forces[output] += quadraticCoefficients[output * quadraticSize + index] * qiqj[static_cast<std::size_t>(index)];
+
+    int qiqjOffset = 0;
+    int cubicOffset = 0;
+    int size = quadraticSize;
+    for (std::size_t i = 0; i < kModeCount; ++i)
+    {
+      for (std::size_t output = 0; output < kModeCount; ++output)
+      {
+        double contribution = 0.0;
+        const std::size_t coefficientOffset = output * cubicSize + cubicOffset;
+        for (int index = 0; index < size; ++index)
+          contribution += cubicCoefficients[coefficientOffset + index] * qiqj[static_cast<std::size_t>(qiqjOffset + index)];
+        forces[output] += q[i] * contribution;
+      }
+      const int remaining = static_cast<int>(kModeCount - i);
+      size -= remaining;
+      qiqjOffset += remaining;
+      cubicOffset += remaining * (remaining + 1) / 2;
+    }
   }
 
   const float * assembleRenderingDisplacements()
@@ -65,29 +152,45 @@ struct ReducedSimulation
     // tab resumes) are integrated in fixed microsteps instead of destabilizing
     // the reduced state in one large Euler step.
     const double clampedDelta = std::max(0.0, std::min(frameDeltaSeconds, 0.05));
-    const int substeps = std::max(1, static_cast<int>(std::ceil(clampedDelta / (1.0 / 120.0))));
+    const int substeps = std::max(1, static_cast<int>(std::ceil(clampedDelta / (1.0 / 240.0))));
     const double dt = clampedDelta / static_cast<double>(substeps);
 
     for (int substep = 0; substep < substeps; ++substep)
     {
+      if (!linearCoefficients.empty())
+      {
+        std::array<double, kModeCount> internalForces;
+        evaluateStVKInternalForces(internalForces);
+        for (std::size_t mode = 0; mode < kModeCount; ++mode)
+        {
+          const double modeNumber = static_cast<double>(mode + 1);
+          const double modalForce = 0.10 * externalForce * std::exp(-0.35 * modeNumber);
+          // simpleBridge.config sets baseFrequency=0.25, so this matches the
+          // native driver's internal-force scale. Semi-implicit integration is
+          // intentionally used here to avoid a BLAS/LAPACK dependency on iOS.
+          const double acceleration = modalForce - 0.0625 * internalForces[mode] - 0.003 * qdot[mode];
+          qdot[mode] += dt * acceleration;
+          q[mode] += dt * qdot[mode];
+        }
+      }
+      else
+      {
+        // Safe fallback while the asynchronous browser asset load is pending.
+        for (std::size_t mode = 0; mode < kModeCount; ++mode)
+        {
+          const double frequency = 5.0 + static_cast<double>(mode + 1) * 1.65;
+          qdot[mode] += dt * (externalForce * std::exp(-0.17 * static_cast<double>(mode + 1)) - frequency * frequency * q[mode]);
+          q[mode] += dt * qdot[mode];
+        }
+      }
+
       for (std::size_t mode = 0; mode < kModeCount; ++mode)
       {
-        const double modeNumber = static_cast<double>(mode + 1);
-        const double angularFrequency = 5.0 + modeNumber * 1.65;
-        const double damping = 0.32 + modeNumber * 0.018;
-        const double neighboringDisplacement =
-          (mode > 0 ? q[mode - 1] : 0.0) +
-          (mode + 1 < kModeCount ? q[mode + 1] : 0.0);
-        const double modalForce = externalForce * std::exp(-0.17 * modeNumber);
-        const double acceleration =
-          modalForce + 0.20 * neighboringDisplacement -
-          damping * qdot[mode] -
-          angularFrequency * angularFrequency * q[mode];
-
-        // Semi-implicit Euler is stable enough for this low-order visual
-        // preview and preserves the fixed-size, SIMD-friendly data layout.
-        qdot[mode] += dt * acceleration;
-        q[mode] += dt * qdot[mode];
+        if (!std::isfinite(q[mode]) || std::abs(q[mode]) > 20.0)
+        {
+          reset();
+          break;
+        }
       }
     }
   }
@@ -133,6 +236,11 @@ int vegafem_web_mode_count()
 int vegafem_web_set_modal_basis(void *, const float * basis, int rows, int modes)
 {
   return g_simulation.setModalBasis(basis, rows, modes) ? 0 : 1;
+}
+
+int vegafem_web_set_stvk_cubic_polynomial(void *, const unsigned char * data, int byteCount)
+{
+  return g_simulation.setStVKCubicPolynomial(data, byteCount) ? 0 : 1;
 }
 
 const float * vegafem_web_deformed_positions(void *)

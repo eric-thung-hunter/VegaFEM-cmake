@@ -34,6 +34,7 @@ file(MAKE_DIRECTORY "${VEGAFEM_WEB_OUTPUT_DIR}/assets")
 file(COPY
   "${CMAKE_CURRENT_SOURCE_DIR}/../reducedDynamicSolver-rt/realtime/simpleBridge/simpleBridge.obj"
   "${CMAKE_CURRENT_SOURCE_DIR}/../reducedDynamicSolver-rt/realtime/simpleBridge/simpleBridge.URendering.float"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../reducedDynamicSolver-rt/realtime/simpleBridge/simpleBridge.cub"
   DESTINATION "${VEGAFEM_WEB_OUTPUT_DIR}/assets")
 
 function(vegafem_add_web_solver target output_name use_simd)
@@ -53,7 +54,7 @@ function(vegafem_add_web_solver target output_name use_simd)
     -sFILESYSTEM=0
     -sALLOW_MEMORY_GROWTH=0
     -sINITIAL_MEMORY=33554432
-    "-sEXPORTED_FUNCTIONS=['_vegafem_web_create','_vegafem_web_reset','_vegafem_web_step','_vegafem_web_set_force','_vegafem_web_modal_state','_vegafem_web_mode_count','_vegafem_web_set_modal_basis','_vegafem_web_deformed_positions','_malloc','_free']")
+    "-sEXPORTED_FUNCTIONS=['_vegafem_web_create','_vegafem_web_reset','_vegafem_web_step','_vegafem_web_set_force','_vegafem_web_modal_state','_vegafem_web_mode_count','_vegafem_web_set_modal_basis','_vegafem_web_set_stvk_cubic_polynomial','_vegafem_web_deformed_positions','_malloc','_free']")
   if(use_simd)
     target_compile_options(${target} PRIVATE -msimd128)
     target_link_options(${target} PRIVATE -msimd128)
