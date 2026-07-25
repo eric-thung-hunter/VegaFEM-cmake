@@ -34,15 +34,11 @@ target_include_directories(reducedDynamicSolver-rt
     ${GLUI_INCLUDE_DIRS}
 )
 target_link_libraries(reducedDynamicSolver-rt 
-  objMeshGPUDeformer 
   objMesh 
   imageIO 
   modalMatrix 
   sceneObjectReduced 
   sceneObject 
-  objMeshGPUDeformer 
-  objMesh 
-  imageIO 
   integratorSparse 
   integratorDense 
   integrator 
@@ -67,3 +63,9 @@ target_link_libraries(reducedDynamicSolver-rt
   ${OPENGL_glu_LIBRARY} 
   ${GLUI_LIBRARY})
 
+if (VegaFEM_ENABLE_Cg_SUPPORT)
+  target_compile_definitions(reducedDynamicSolver-rt
+    PRIVATE VEGAFEM_ENABLE_CG_GPU_DEFORMER
+  )
+  target_link_libraries(reducedDynamicSolver-rt objMeshGPUDeformer)
+endif()

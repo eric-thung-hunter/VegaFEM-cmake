@@ -58,3 +58,34 @@ jobs:
             build/bin
             build/lib
           if-no-files-found: error
+
+  reduced-demo-build:
+    name: Linux reduced StVK demo build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install demo dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            freeglut3-dev \
+            libgl1-mesa-dev \
+            libglew-dev \
+            liblapacke-dev \
+            libopenblas-dev \
+            libxmu-dev
+
+      - name: Configure Cg-free reduced demo
+        run: >-
+          cmake -S . -B build-reduced-demo -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DVegaFEM_BUILD_MODEL_REDUCTION=ON
+          -DVegaFEM_ENABLE_OpenGL_SUPPORT=ON
+          -DVegaFEM_ENABLE_Cg_SUPPORT=OFF
+          -DVegaFEM_BUILD_UTILITIES=ON
+
+      - name: Build Cg-free reduced demo
+        run: cmake --build build-reduced-demo --target reducedDynamicSolver-rt --parallel

@@ -62,7 +62,9 @@ using namespace std;
 
 #include "initGraphics.h"
 #include "sceneObjectReducedCPU.h"
-#include "sceneObjectReducedGPU.h"
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
+  #include "sceneObjectReducedGPU.h"
+#endif
 #include "performanceCounter.h"
 #include "implicitNewmarkDense.h"
 #include "implicitBackwardEulerDense.h"
@@ -96,7 +98,11 @@ int enableNormalCorrection = 0;
 int computeDynamicNormals = 0;
 int lockScene=0;
 int staticSolver = 0;
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
 int renderOnGPU = 1;
+#else
+int renderOnGPU = 0;
+#endif
 int displayContactInfo = 0;
 int syncTimeStepWithGraphics=1;
 float timeStep = 1.0 / 30;
@@ -121,7 +127,9 @@ PerformanceCounter titleBarCounter;
 PerformanceCounter explosionCounter;
 Lighting * lighting = NULL;
 SceneObjectReduced * deformableObjectRenderingMeshReduced = NULL;
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
 SceneObjectReducedGPU * deformableObjectRenderingMeshGPU = NULL;
+#endif
 SceneObjectReducedCPU * deformableObjectRenderingMeshCPU = NULL;
 SceneObject * extraSceneGeometry = NULL;
 ModalMatrix * renderingModalMatrix = NULL;
@@ -155,7 +163,9 @@ char backgroundColorString[4096] = "255 255 255";
 
 GLUI * glui;
 GLUI_Spinner * timeStep_spinner;
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
 GLUI_Checkbox * renderOnGPU_checkbox;
+#endif
 float deformableObjectCompliance = 1.0;
 float baseFrequency = 1.0;
 int sceneID=0;
@@ -633,7 +643,9 @@ void initScene()
   fq = (double*) calloc (r, sizeof(double));
   fqBase = (double*) calloc (r, sizeof(double));
 
-  // initialize the GPU rendering class for the deformable object
+  // Initialize the optional legacy Cg GPU renderer. The CPU path is always
+  // available and is the default when Cg support is disabled.
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
   try
   {
     deformableObjectRenderingMeshGPU = new SceneObjectReducedGPU(deformableObjectFilename, renderingModalMatrix); // uses GPU to compute u=Uq
@@ -644,6 +656,9 @@ void initScene()
     deformableObjectRenderingMeshGPU = NULL;
     renderOnGPU = 0;
   }
+#else
+  renderOnGPU = 0;
+#endif
 
   // initialize the CPU rendering class for the deformable object
   deformableObjectRenderingMeshCPU = new SceneObjectReducedCPU(deformableObjectFilename, renderingModalMatrix); // uses CPU to compute u=Uq
@@ -651,16 +666,19 @@ void initScene()
   // prepare textures (if necessary)
   if (enableTextures)
   {
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
     if (deformableObjectRenderingMeshGPU != NULL)
     {
       deformableObjectRenderingMeshGPU->SetUpTextures(SceneObject::MODULATE, SceneObject::USEMIPMAP);
       deformableObjectRenderingMeshGPU->EnableTextures();
     }
+#endif
     deformableObjectRenderingMeshCPU->SetUpTextures(SceneObject::MODULATE, SceneObject::USEMIPMAP);
     deformableObjectRenderingMeshCPU->EnableTextures();
   }
 
-  // create a buffer used when searching for the 3D vertex closest to the click location
+  // Create a buffer used when searching for the 3D vertex closest to the click location.
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
   if (deformableObjectRenderingMeshGPU != NULL)
     uClosestVertexBuffer = (double*) 
       malloc (sizeof(double) * 3 * deformableObjectRenderingMeshGPU->Getn());
@@ -668,6 +686,7 @@ void initScene()
   if (renderOnGPU)
     deformableObjectRenderingMeshReduced = deformableObjectRenderingMeshGPU;
   else
+#endif
     deformableObjectRenderingMeshReduced = deformableObjectRenderingMeshCPU;
 
   deformableObjectRenderingMeshReduced->ResetDeformationToRest();
@@ -797,6 +816,12 @@ void initConfigurations()
     exit(1);
   }
   // the config variables have now been loaded with their specified values
+
+#ifndef VEGAFEM_ENABLE_CG_GPU_DEFORMER
+  // The Cg-based renderer is not part of this build, even if a legacy scene
+  // configuration requests it.
+  renderOnGPU = 0;
+#endif
 
   // informatively print the variables (with assigned values) that were just parsed
   configFile.printOptions();
@@ -938,6 +963,7 @@ void timeStepSubdivisions_spinnerCallBack(int code)
 
 void renderOnGPU_checkBoxCallBack(int code)
 {
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
   if (renderOnGPU && (deformableObjectRenderingMeshGPU != NULL))
   {
     deformableObjectRenderingMeshReduced = deformableObjectRenderingMeshGPU;
@@ -946,6 +972,10 @@ void renderOnGPU_checkBoxCallBack(int code)
   {
     deformableObjectRenderingMeshReduced = deformableObjectRenderingMeshCPU;
   }
+#else
+  renderOnGPU = 0;
+  deformableObjectRenderingMeshReduced = deformableObjectRenderingMeshCPU;
+#endif
 }
 
 void forceModel_checkBoxCallBack(int code)
@@ -1054,8 +1084,10 @@ void initGLUI()
 
   glui->add_spinner_to_panel(timeStep_panel,"Substeps per timestep", GLUI_SPINNER_INT, &substepsPerTimeStep, 0, timeStepSubdivisions_spinnerCallBack);
 
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
   renderOnGPU_checkbox = 
     glui->add_checkbox("Compute u=Uq on GPU", &renderOnGPU, 0, renderOnGPU_checkBoxCallBack);
+#endif
 
   glui->add_separator();
 
@@ -1104,12 +1136,13 @@ int main(int argc, char* argv[])
 
   initScene();
 
-  // disable the GPU UI switch if no GPU support for vertex texture fetches
+  // Disable the GPU UI switch if no GPU support for vertex texture fetches.
+#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
   if (deformableObjectRenderingMeshGPU == NULL)
     renderOnGPU_checkbox->disable();
+#endif
 
   glutMainLoop(); 
 
   return 0;
 }
-

@@ -1,6 +1,6 @@
 if (VegaFEM_BUILD_MODEL_REDUCTION)
   add_subdirectory(largeModalDeformationFactory)
-  if (VegaFEM_ENABLE_Cg_SUPPORT)
+  if (VegaFEM_ENABLE_OpenGL_SUPPORT)
     add_subdirectory(reducedDynamicSolver-rt)
   endif()
 endif()
