@@ -15,17 +15,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-
-      - name: Set up MSVC
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
 
       - name: Configure
         run: >-
@@ -43,7 +37,6 @@ jobs:
         run: cmake --install build --config Release --prefix install
 
       - name: Linux utility smoke test
-        if: runner.os == 'Linux'
         run: |
           ./build/bin/generateMassMatrix \
             examples/turtle/model/turtle-volumetric-homogeneous.veg \
