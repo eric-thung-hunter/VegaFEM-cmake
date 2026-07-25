@@ -16,7 +16,7 @@ find_path(CBLAS_INCLUDE_DIR
   )
 
 find_library(CBLAS_LIBRARY
-  NAMES cblas
+  NAMES cblas openblas
   PATHS
   /usr/lib64
   /usr/lib
