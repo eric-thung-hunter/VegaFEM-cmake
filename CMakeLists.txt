@@ -62,6 +62,7 @@ if (VegaFEM_BUILD_MODERN_BACKEND_CHECK)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
   find_package(Vulkan REQUIRED)
+  find_package(OpenCL REQUIRED)
 endif()
 
 #---------------------------------------------------------------------

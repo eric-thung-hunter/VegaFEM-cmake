@@ -8,6 +8,7 @@ target_link_libraries(vegaModernBackendCheck
   PRIVATE
     PkgConfig::SDL2
     Vulkan::Vulkan
+    OpenCL::OpenCL
 )
 
 install(TARGETS vegaModernBackendCheck

@@ -9,6 +9,7 @@
 #include <SDL.h>
 #include <vulkan/vulkan.h>
 #include <sycl/sycl.hpp>
+#include <CL/cl.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -63,6 +64,41 @@ void checkSycl()
 
   std::cout << "SYCL validation device: "
             << queue.get_device().get_info<sycl::info::device::name>() << '\n';
+}
+
+bool checkOpenCL()
+{
+  cl_uint platformCount = 0;
+  if (clGetPlatformIDs(0, nullptr, &platformCount) != CL_SUCCESS ||
+      platformCount == 0)
+    return false;
+
+  std::vector<cl_platform_id> platforms(platformCount);
+  if (clGetPlatformIDs(platformCount, platforms.data(), nullptr) != CL_SUCCESS)
+    return false;
+
+  bool foundDevice = false;
+  for (cl_platform_id platform : platforms)
+  {
+    size_t nameSize = 0;
+    clGetPlatformInfo(platform, CL_PLATFORM_NAME, 0, nullptr, &nameSize);
+    std::string name(nameSize, '\0');
+    if (nameSize != 0)
+      clGetPlatformInfo(platform, CL_PLATFORM_NAME, nameSize, name.data(), nullptr);
+    if (!name.empty() && name.back() == '\0')
+      name.pop_back();
+
+    cl_uint deviceCount = 0;
+    const cl_int result = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr,
+                                         &deviceCount);
+    if (result != CL_SUCCESS || deviceCount == 0)
+      continue;
+
+    std::cout << "OpenCL platform: " << name << " (" << deviceCount
+              << " device(s))\n";
+    foundDevice = true;
+  }
+  return foundDevice;
 }
 
 void checkVulkan()
@@ -127,7 +163,19 @@ int main()
               << static_cast<int>(version.minor) << '.'
               << static_cast<int>(version.patch) << '\n';
     checkVulkan();
-    checkSycl();
+    bool syclAvailable = false;
+    try
+    {
+      checkSycl();
+      syclAvailable = true;
+    }
+    catch (const std::exception &error)
+    {
+      std::cerr << "SYCL unavailable: " << error.what() << '\n';
+    }
+    const bool openclAvailable = checkOpenCL();
+    if (!syclAvailable && !openclAvailable)
+      throw std::runtime_error("neither SYCL nor OpenCL reported a compute device");
   }
   catch (const std::exception &error)
   {

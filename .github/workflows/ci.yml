@@ -138,7 +138,7 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             cmake ninja-build pkg-config libsdl2-dev libvulkan-dev \
-            mesa-vulkan-drivers
+            mesa-vulkan-drivers ocl-icd-opencl-dev
 
       - name: Configure modern backend check with icpx
         shell: bash
