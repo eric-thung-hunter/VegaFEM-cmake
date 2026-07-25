@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#10151c">
+    <title>VegaFEM — Web reduced dynamics</title>
+    <link rel="stylesheet" href="./style.css">
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./three.module.js",
+          "three/webgpu": "./three.webgpu.js",
+          "three/tsl": "./three.tsl.js",
+          "three/addons/": "./addons/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main>
+      <canvas id="simulation" aria-label="Interactive reduced bridge simulation"></canvas>
+      <section class="panel" aria-label="Simulation controls">
+        <p class="eyebrow">VegaFEM Web</p>
+        <h1>Reduced bridge</h1>
+        <p id="renderer-status" class="status">Starting renderer…</p>
+        <p class="hint">Drag on the bridge to apply a force. One finger pans; two fingers orbit.</p>
+        <label for="force-scale">Force <output id="force-value">12</output></label>
+        <input id="force-scale" type="range" min="1" max="30" value="12" inputmode="numeric">
+        <div class="buttons">
+          <button id="pause" type="button">Pause</button>
+          <button id="reset" type="button">Reset</button>
+        </div>
+        <p class="footer">20-mode CPU WebAssembly simulation · <span id="frame-time">0.0 ms</span></p>
+      </section>
+      <p id="failure" class="failure" hidden></p>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

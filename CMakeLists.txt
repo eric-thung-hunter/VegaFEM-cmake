@@ -36,6 +36,14 @@ option(VegaFEM_ENABLE_ExpoKit_SUPPORT "Should matrix classes use ExpoKit for exp
 # TODO: define USE_EXPOKIT if enabled
 option(VegaFEM_ENABLE_OpenGL_SUPPORT "Should modules that require OpenGL be enabled?" ON)
 option(VegaFEM_ENABLE_PTHREADS_SUPPORT "Use multithreading (pthread)" ON)
+option(VegaFEM_BUILD_WEB_DEMO "Build the browser/WebAssembly reduced-dynamics demo (Emscripten only)." OFF)
+# The browser demo deliberately has no native fallback binary. Keeping this
+# check at configuration time makes accidental host builds fail clearly.
+if(VegaFEM_BUILD_WEB_DEMO AND NOT EMSCRIPTEN)
+  message(FATAL_ERROR
+    "VegaFEM_BUILD_WEB_DEMO requires the Emscripten toolchain. "
+    "Configure with: emcmake cmake ... -DVegaFEM_BUILD_WEB_DEMO=ON")
+endif()
 # TODO: add option for arpack++ and define USEARPACKPLUSPLUS
 # TODO: add option for spooles and define SPOOLES_SOLVER_IS_AVAILABLE
 
