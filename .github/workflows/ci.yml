@@ -150,7 +150,6 @@ jobs:
       - name: Configure modern backend check with icpx
         shell: bash
         run: |
-          source /opt/intel/oneapi/setvars.sh
           cmake -S . -B build-modern -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=icx \
@@ -165,11 +164,9 @@ jobs:
       - name: Build modern backend check
         shell: bash
         run: |
-          source /opt/intel/oneapi/setvars.sh
           cmake --build build-modern --target vegaModernBackendCheck --parallel
 
       - name: Run modern backend check
         shell: bash
         run: |
-          source /opt/intel/oneapi/setvars.sh
           ./build-modern/bin/vegaModernBackendCheck
