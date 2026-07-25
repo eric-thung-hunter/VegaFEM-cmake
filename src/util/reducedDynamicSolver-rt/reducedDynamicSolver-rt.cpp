@@ -504,7 +504,9 @@ void keyboardFunction (unsigned char key, int x, int y)
 
 void reshape(int x, int y)
 {
-  ImGui_ImplGLUT_ReshapeFunc(x, y);
+  // initGraphics invokes reshape before the ImGui context is created.
+  if (ImGui::GetCurrentContext() != NULL)
+    ImGui_ImplGLUT_ReshapeFunc(x, y);
 
   glViewport(0,0,x,y);
 
