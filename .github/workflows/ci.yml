@@ -91,6 +91,13 @@ jobs:
             build-reduced-demo/runtime-libs/libopenblas.so.0
           cp -L "$(ldconfig -p | awk '/libglut\.so\.3\.12/{print $NF; exit}')" \
             build-reduced-demo/runtime-libs/libglut.so.3.12
+          # OpenBLAS is linked against the GNU Fortran runtime. Bundle that
+          # runtime so consumers do not accidentally resolve it from a host
+          # installation with an incompatible glibc/libgfortran pair.
+          cp -L "$(ldconfig -p | awk '/libgfortran\.so\.5/{print $NF; exit}')" \
+            build-reduced-demo/runtime-libs/libgfortran.so.5
+          cp -L "$(ldconfig -p | awk '/libquadmath\.so\.0/{print $NF; exit}')" \
+            build-reduced-demo/runtime-libs/libquadmath.so.0
 
       - name: Run simpleBridge demo smoke test
         working-directory: src/util/reducedDynamicSolver-rt
