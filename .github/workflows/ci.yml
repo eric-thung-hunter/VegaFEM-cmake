@@ -91,6 +91,14 @@ jobs:
       - name: Build Cg-free reduced demo
         run: cmake --build build-reduced-demo --target reducedDynamicSolver-rt --parallel
 
+      - name: Bundle demo runtime dependencies
+        run: |
+          mkdir -p build-reduced-demo/runtime-libs
+          cp -L "$(ldconfig -p | awk '/libopenblas\.so\.0/{print $NF; exit}')" \
+            build-reduced-demo/runtime-libs/libopenblas.so.0
+          cp -L "$(ldconfig -p | awk '/libglut\.so\.3\.12/{print $NF; exit}')" \
+            build-reduced-demo/runtime-libs/libglut.so.3.12
+
       - name: Run simpleBridge demo smoke test
         working-directory: src/util/reducedDynamicSolver-rt
         run: |
@@ -112,5 +120,6 @@ jobs:
           path: |
             build-reduced-demo/bin/reducedDynamicSolver-rt
             build-reduced-demo/lib
+            build-reduced-demo/runtime-libs
             src/util/reducedDynamicSolver-rt/realtime
           if-no-files-found: error
