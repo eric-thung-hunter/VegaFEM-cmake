@@ -166,6 +166,29 @@ jobs:
         run: |
           cmake --build build-modern --target vegaModernBackendCheck --parallel
 
+      - name: Bundle modern backend executable and oneAPI runtime
+        shell: bash
+        run: |
+          mkdir -p modern-backend-bundle/runtime-libs
+          cp -L build-modern/bin/vegaModernBackendCheck modern-backend-bundle/
+          # Bundle the Intel runtime libraries so this CI-built probe can be
+          # downloaded and executed on a compatible Linux workstation.
+          ldd build-modern/bin/vegaModernBackendCheck \
+            | awk '/=> \/opt\/intel\// {print $3} /^\/opt\/intel\// {print $1}' \
+            | sort -u \
+            | while read -r library; do cp -L "$library" modern-backend-bundle/runtime-libs/; done
+          find /opt/intel/oneapi/compiler/2026.1/lib -maxdepth 1 -type f \
+            \( -name 'libsycl.so*' -o -name 'libur_*.so*' -o -name 'libpi_*.so*' \
+               -o -name 'libOpenCL.so*' -o -name 'libintelocl.so*' \) \
+            -exec cp -L {} modern-backend-bundle/runtime-libs/ \;
+
+      - name: Upload modern backend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: modern-backend-check-linux-x64
+          path: modern-backend-bundle
+          if-no-files-found: error
+
       - name: Run modern backend check
         shell: bash
         run: |
