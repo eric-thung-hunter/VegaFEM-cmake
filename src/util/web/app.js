@@ -23,6 +23,7 @@ const wireframe = document.querySelector('#wireframe');
 const forceMarker = document.querySelector('#force-marker');
 
 let running = true;
+let releaseTailTimer = null;
 
 const camera = { yaw: 0.0, pitch: 0.21, distance: 24.8, target: [0, 1.2, 0] };
 const drag = { mode: '', pointerId: null, startX: 0, startY: 0, vertex: -1, force: [0, 0, 0] };
@@ -340,6 +341,7 @@ async function main() {
   linearModel.addEventListener('change', () => module._vegafem_web_set_parameter(simulation, 4, linearModel.checked ? 1 : 0));
   staticOnly.addEventListener('change', () => module._vegafem_web_set_parameter(simulation, 5, staticOnly.checked ? 1 : 0));
   const clearPull = () => {
+    if (releaseTailTimer !== null) { clearTimeout(releaseTailTimer); releaseTailTimer = null; }
     if (drag.mode === 'pull') module._vegafem_web_clear_pull(simulation);
     drag.mode = ''; drag.pointerId = null; drag.vertex = -1; drag.force = [0, 0, 0]; pullStatus.textContent = 'Pick a bridge member to apply force';
   };
@@ -350,6 +352,7 @@ async function main() {
   showPanelButton.addEventListener('click', () => { panel.hidden = false; showPanelButton.hidden = true; });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
+    clearPull();
     const frame = cameraFrame(canvas.width / canvas.height);
     drag.pointerId = event.pointerId; drag.startX = event.clientX; drag.startY = event.clientY;
     const vertex = event.button === 0 ? pickBridgeVertex(event, bridge, frame) : -1;
@@ -362,14 +365,27 @@ async function main() {
     const dx = event.clientX - drag.startX, dy = event.clientY - drag.startY;
     if (drag.mode === 'pull') {
       const frame = cameraFrame(canvas.width / canvas.height);
-      drag.force = add(scale(frame.right, dx), scale(frame.up, -dy));
+      const screenForce = add(scale(frame.right, dx), scale(frame.up, -dy));
+      // Browser drags are normally only a few pixels. Convert that into a
+      // bounded physical pull so a short, ordinary motion is visible while a
+      // huge gesture cannot destabilize the reduced explicit integrator.
+      const pullStrength = Math.min(140, length(screenForce) * 4.0);
+      drag.force = pullStrength > 0 ? scale(normalize(screenForce), pullStrength) : [0, 0, 0];
       module._vegafem_web_set_pull(simulation, drag.vertex, drag.force[0], drag.force[1], drag.force[2]);
-      pullStatus.textContent = `Pulling vertex ${drag.vertex} · ${Math.hypot(dx, dy).toFixed(0)} px`;
+      pullStatus.textContent = `Pulling vertex ${drag.vertex} · strength ${pullStrength.toFixed(0)}`;
     } else if (drag.mode === 'orbit') {
       camera.yaw -= dx * 0.008; camera.pitch = Math.max(-1.35, Math.min(1.35, camera.pitch - dy * 0.008)); drag.startX = event.clientX; drag.startY = event.clientY;
     }
   });
-  const release = (event) => { if (event.pointerId === drag.pointerId) clearPull(); };
+  const release = (event) => {
+    if (event.pointerId !== drag.pointerId) return;
+    if (drag.mode !== 'pull') { clearPull(); return; }
+    // Preserve the final drag force briefly so release cannot erase the only
+    // visually perceptible part of a quick pointer gesture.
+    drag.pointerId = null;
+    pullStatus.textContent = `Released vertex ${drag.vertex}`;
+    releaseTailTimer = setTimeout(clearPull, 220);
+  };
   canvas.addEventListener('pointerup', release); canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('wheel', (event) => { event.preventDefault(); camera.distance = Math.max(12, Math.min(38, camera.distance * Math.exp(event.deltaY * 0.001))); }, { passive: false });
   addEventListener('resize', () => resizeCanvas(renderer));
