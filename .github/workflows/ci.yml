@@ -125,3 +125,51 @@ jobs:
             build-reduced-demo/runtime-libs
             src/util/reducedDynamicSolver-rt/realtime
           if-no-files-found: error
+
+  modern-backend-toolchain:
+    name: Linux modern SDL2/Vulkan/SYCL toolchain check
+    runs-on: ubuntu-latest
+    # Intel publishes this image with the DPC++ compiler and SYCL runtime.
+    # The hosted runner is intentionally used only for a compile/runtime
+    # smoke test; physical Intel-GPU performance tests belong on a
+    # self-hosted runner with /dev/dri access.
+    container: intel/oneapi-toolkit:2026.1.0-devel-ubuntu24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install native window and Vulkan development packages
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config libsdl2-dev libvulkan-dev \
+            mesa-vulkan-drivers
+
+      - name: Configure modern backend check with icpx
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          cmake -S . -B build-modern -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=icx \
+            -DCMAKE_CXX_COMPILER=icpx \
+            -DVegaFEM_BUILD_MODEL_REDUCTION=OFF \
+            -DVegaFEM_ENABLE_OpenGL_SUPPORT=OFF \
+            -DVegaFEM_ENABLE_PTHREADS_SUPPORT=OFF \
+            -DVegaFEM_ENABLE_SYCL_SUPPORT=ON \
+            -DVegaFEM_BUILD_MODERN_BACKEND_CHECK=ON \
+            -DVegaFEM_BUILD_UTILITIES=ON
+
+      - name: Build modern backend check
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          cmake --build build-modern --target vegaModernBackendCheck --parallel
+
+      - name: Run modern backend check
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          ./build-modern/bin/vegaModernBackendCheck

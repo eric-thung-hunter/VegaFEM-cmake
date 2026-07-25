@@ -35,13 +35,33 @@ option(VegaFEM_BUILD_MODEL_REDUCTION "Should model-reduction techniques be inclu
 option(VegaFEM_ENABLE_ExpoKit_SUPPORT "Should matrix classes use ExpoKit for exponentiation?" OFF)
 # TODO: define USE_EXPOKIT if enabled
 option(VegaFEM_ENABLE_OpenGL_SUPPORT "Should modules that require OpenGL be enabled?" ON)
+option(VegaFEM_ENABLE_IMGUI_SUPPORT "Use Dear ImGui for native simulator controls." ON)
+option(VegaFEM_ENABLE_SDL2_SUPPORT "Use SDL2 for a native Wayland window." OFF)
 option(VegaFEM_ENABLE_PTHREADS_SUPPORT "Use multithreading (pthread)" ON)
+option(VegaFEM_BUILD_MODERN_BACKEND_CHECK
+  "Build the SDL2/Vulkan/SYCL modern-backend toolchain check." OFF)
+option(VegaFEM_ENABLE_SYCL_SUPPORT
+  "Enable Intel oneAPI DPC++/SYCL compilation for modern targets." OFF)
 # TODO: add option for arpack++ and define USEARPACKPLUSPLUS
 # TODO: add option for spooles and define SPOOLES_SOLVER_IS_AVAILABLE
 
 if (VegaFEM_ENABLE_OpenGL_SUPPORT)
   # Only add Cg support if OpenGL is turned on. This may change in the future.
   option(VegaFEM_ENABLE_Cg_SUPPORT "Should modules that require Cg be enabled?" OFF)
+endif()
+
+if (VegaFEM_BUILD_MODERN_BACKEND_CHECK)
+  if (NOT VegaFEM_ENABLE_SYCL_SUPPORT)
+    message(FATAL_ERROR
+      "VegaFEM_BUILD_MODERN_BACKEND_CHECK requires VegaFEM_ENABLE_SYCL_SUPPORT=ON")
+  endif()
+  if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    message(FATAL_ERROR
+      "The modern backend requires IntelLLVM/icpx. Configure with -DCMAKE_CXX_COMPILER=icpx")
+  endif()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+  find_package(Vulkan REQUIRED)
 endif()
 
 #---------------------------------------------------------------------
@@ -147,6 +167,11 @@ if (VegaFEM_ENABLE_OpenGL_SUPPORT)
   find_package(GLUT)
   find_package(GLEW)
   find_package(GLUI)
+  if (VegaFEM_ENABLE_SDL2_SUPPORT)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SDL2 REQUIRED sdl2)
+    add_compile_definitions(VEGA_USE_SDL2)
+  endif()
   if (GLUT_FOUND)
     mark_as_advanced(GLUT_cocoa_LIBRARY)
   endif()
@@ -159,6 +184,10 @@ if (VegaFEM_ENABLE_OpenGL_SUPPORT)
       CG_LIBRARY
     )
   endif()
+endif()
+
+if (VegaFEM_ENABLE_IMGUI_SUPPORT AND VegaFEM_ENABLE_OpenGL_SUPPORT)
+  add_subdirectory(thirdparty/imgui)
 endif()
 
 if(VegaFEM_ENABLE_PTHREADS_SUPPORT)
