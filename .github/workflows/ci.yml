@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-build:
+    name: ${{ matrix.os }} core build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DVegaFEM_BUILD_MODEL_REDUCTION=OFF
+          -DVegaFEM_ENABLE_OpenGL_SUPPORT=OFF
+          -DVegaFEM_ENABLE_PTHREADS_SUPPORT=OFF
+          -DVegaFEM_BUILD_UTILITIES=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Install
+        run: cmake --install build --config Release --prefix install
