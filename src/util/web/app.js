@@ -287,10 +287,10 @@ function pickBridgeVertex(event, bridge, frame) {
   }
   if (picked >= 0) return picked;
 
-  // The bridge is a truss with plenty of screen-space gaps. The native demo
-  // only sees rasterized triangles, which makes a casual browser drag feel
-  // unresponsive. When no triangle was hit, accept the nearest rendered
-  // vertex inside a generous world-space cursor radius instead.
+  // The bridge is a truss with plenty of screen-space gaps. A web demo must
+  // not make the pull depend on landing on a sub-pixel triangle: any primary
+  // drag on the simulation canvas targets the closest Bridge vertex. Camera
+  // orbiting remains available through right-drag and the wheel.
   let nearestVertex = -1;
   let nearestDistanceSquared = Infinity;
   for (let vertex = 0; vertex < bridge.positions.length; vertex += 3) {
@@ -304,7 +304,7 @@ function pickBridgeVertex(event, bridge, frame) {
       nearestVertex = vertex / 3;
     }
   }
-  return nearestDistanceSquared < 1.0 ? nearestVertex : -1;
+  return nearestVertex;
 }
 
 async function main() {

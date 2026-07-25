@@ -11,7 +11,7 @@ body { margin: 0; min-width: 320px; overflow: hidden; }
 
 main, #simulation { width: 100vw; height: 100vh; display: block; }
 
-#simulation { touch-action: none; }
+#simulation { cursor: crosshair; touch-action: none; }
 
 .panel {
   position: fixed;
