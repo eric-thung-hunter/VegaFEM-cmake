@@ -285,7 +285,26 @@ function pickBridgeVertex(event, bridge, frame) {
       return currentDistance < bestDistance ? candidate : best;
     }, candidates[0]);
   }
-  return picked;
+  if (picked >= 0) return picked;
+
+  // The bridge is a truss with plenty of screen-space gaps. The native demo
+  // only sees rasterized triangles, which makes a casual browser drag feel
+  // unresponsive. When no triangle was hit, accept the nearest rendered
+  // vertex inside a generous world-space cursor radius instead.
+  let nearestVertex = -1;
+  let nearestDistanceSquared = Infinity;
+  for (let vertex = 0; vertex < bridge.positions.length; vertex += 3) {
+    const point = [bridge.positions[vertex], bridge.positions[vertex + 1], bridge.positions[vertex + 2]];
+    const alongRay = dot(subtract(point, ray.origin), ray.direction);
+    if (alongRay <= 0) continue;
+    const separation = subtract(point, add(ray.origin, scale(ray.direction, alongRay)));
+    const distanceSquared = dot(separation, separation);
+    if (distanceSquared < nearestDistanceSquared) {
+      nearestDistanceSquared = distanceSquared;
+      nearestVertex = vertex / 3;
+    }
+  }
+  return nearestDistanceSquared < 1.0 ? nearestVertex : -1;
 }
 
 async function main() {
