@@ -6,23 +6,13 @@
     <meta name="theme-color" content="#10151c">
     <title>VegaFEM — Web reduced dynamics</title>
     <link rel="stylesheet" href="./style.css">
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "./three.module.js",
-          "three/webgpu": "./three.webgpu.js",
-          "three/tsl": "./three.tsl.js",
-          "three/addons/": "./addons/"
-        }
-      }
-    </script>
   </head>
   <body>
     <main>
       <canvas id="simulation" aria-label="Interactive reduced bridge simulation"></canvas>
       <section class="panel" aria-label="Simulation controls">
         <div class="panel-title"><div><p class="eyebrow">VegaFEM Web</p><h1>Bridge controls</h1></div><button id="hide-panel" class="icon-button" type="button" aria-label="Hide controls">×</button></div>
-        <p id="renderer-status" class="status">Starting renderer…</p>
+        <p id="renderer-status" class="status">Starting raw WebGL2 renderer…</p>
         <p class="hint">Left-drag a bridge member to pull its picked vertex. Right-drag orbits; wheel zooms.</p>
         <p id="pull-status" class="pull-status">Pick a bridge member to apply force</p>
 

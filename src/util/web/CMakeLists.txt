@@ -5,27 +5,6 @@
 # while sharing the numerical model format in later porting steps.
 
 set(VEGAFEM_WEB_OUTPUT_DIR "${CMAKE_BINARY_DIR}/web")
-file(MAKE_DIRECTORY "${VEGAFEM_WEB_OUTPUT_DIR}/addons/controls")
-
-# Pin the renderer files that are shipped alongside the generated Wasm files.
-# Keeping them in the build output (instead of a CDN) makes offline and
-# air-gapped deployments behave the same as CI.
-function(vegafem_download_web_asset relative_path source_path sha256)
-  set(destination "${VEGAFEM_WEB_OUTPUT_DIR}/${relative_path}")
-  get_filename_component(destination_directory "${destination}" DIRECTORY)
-  file(MAKE_DIRECTORY "${destination_directory}")
-  file(DOWNLOAD
-    "https://raw.githubusercontent.com/mrdoob/three.js/r180/${source_path}"
-    "${destination}"
-    EXPECTED_HASH "SHA256=${sha256}"
-    TLS_VERIFY ON)
-endfunction()
-
-vegafem_download_web_asset("three.module.js" "build/three.module.js" "c8211c69345d2e9949dc7a8ac969380497aa0600a5a8ac6a459c8cd02dd9cb8a")
-vegafem_download_web_asset("three.webgpu.js" "build/three.webgpu.js" "c6b225365368fc052bd96ebfae1363324ea526e59f15a60e201e1257c3adc12f")
-vegafem_download_web_asset("three.tsl.js" "build/three.tsl.js" "ac2c7cd43ce90d006c12e2ace3e0af98a1bd538162c661e4199b50edcf508d92")
-vegafem_download_web_asset("three.core.js" "build/three.core.js" "eb077d2417f61d3e6d9264c317cabc4ea35769ed6b0ab533067292a550784c20")
-vegafem_download_web_asset("addons/controls/OrbitControls.js" "examples/jsm/controls/OrbitControls.js" "b97879c748170baadeb3fb84cea1ffdf4674e283dc06042f34e2acb95a76042c")
 
 configure_file(index.html "${VEGAFEM_WEB_OUTPUT_DIR}/index.html" COPYONLY)
 configure_file(app.js "${VEGAFEM_WEB_OUTPUT_DIR}/app.js" COPYONLY)

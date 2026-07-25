@@ -5,16 +5,14 @@ separate from the GLUT/ImGui native demo:
 
 * `webBridge.cpp` exposes a small C ABI whose payload is the reduced modal
   state `q`.
-* `app.js` owns the Three.js scene, input and rendering.
-* Three's `WebGPURenderer` prefers WebGPU where available and uses a WebGL2
-  backend when it is not. A direct `WebGLRenderer` fallback is retained if
-  renderer initialisation itself fails.
+* `app.js` owns a raw WebGL2 renderer, triangle ray picker and orbit camera.
+  It has no JavaScript rendering-library dependency.
 
 The demo ships the native `simpleBridge.obj` mesh and its exact
 `simpleBridge.URendering.float` 48,255 x 20 rendering modal matrix, plus the
 precomputed `simpleBridge.cub` StVK polynomial. The Wasm core performs the
 same column-major `u = Uq` assembly and evaluates the same reduced internal
-force polynomial as the native demo; Three.js renders the resulting Bridge
+force polynomial as the native demo; raw WebGL2 renders the resulting Bridge
 geometry. It uses a fixed-step semi-implicit integrator rather than the native
 implicit Newmark solver so the Safari path has no BLAS/LAPACK dependency.
 
@@ -32,9 +30,9 @@ emcmake cmake -S . -B build-web -G Ninja \
 cmake --build build-web --target vegafem_web_demo --parallel
 ```
 
-The self-contained deployable bundle is in `build-web/web`. The build pins the
-Three.js browser modules by SHA-256 and ships them in that directory, so a
-deployment does not rely on a CDN.
+The self-contained deployable bundle is in `build-web/web`. It contains only
+the application source, generated Wasm artifacts, and native Bridge assets;
+there is no CDN or third-party JavaScript renderer.
 
 Serve the directory through HTTP(S); opening `index.html` from the filesystem
 will not allow the browser to fetch the `.wasm` module. Configure the server to
@@ -44,13 +42,13 @@ send `.wasm` as `application/wasm` for streaming compilation.
 
 The compatibility contract is intentionally conservative:
 
-* WebAssembly plus WebGL2 is the required rendering baseline.
+* WebAssembly plus raw WebGL2 is the required rendering baseline.
 * The shipped solver has no pthreads, `SharedArrayBuffer`, COOP/COEP headers,
   or WebGPU requirement. The page feature-detects Wasm SIMD and chooses the
   LTO/SIMD artifact when available; otherwise it loads the baseline artifact.
-* One-finger dragging applies force; two-finger interaction remains available
-  for the Three.js orbit controls. The canvas disables browser gesture handling
-  only while interacting with the simulation.
+* Left-dragging a bridge member applies force to its picked vertex. Right-drag
+  orbits and the wheel zooms. The canvas disables browser gesture handling
+  while interacting with the simulation.
 * The pixel ratio is capped at 2 and Wasm memory is fixed at 32 MiB to keep
   mobile memory/bandwidth predictable.
 

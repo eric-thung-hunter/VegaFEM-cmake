@@ -160,13 +160,15 @@ jobs:
           test -s build-web/web/vegafem-web-sim.wasm
           test -s build-web/web/vegafem-web-sim-simd.js
           test -s build-web/web/vegafem-web-sim-simd.wasm
-          test -s build-web/web/three.module.js
-          test -s build-web/web/three.webgpu.js
           test -s build-web/web/assets/simpleBridge.obj
           test -s build-web/web/assets/simpleBridge.URendering.float
           test -s build-web/web/assets/simpleBridge.cub
-          grep -F "WebGL2 fallback" build-web/web/app.js
-          grep -F "CPU Wasm solver" build-web/web/app.js
+          grep -F "Framework-free WebGL2 host" build-web/web/app.js
+          grep -F "Raw WebGL2 renderer" build-web/web/app.js
+          if find build-web/web \( -iname '*three*' -o -path '*/addons/*' \) -print -quit | grep -q .; then
+            echo "Three.js or addon assets leaked into the raw WebGL bundle"
+            exit 1
+          fi
 
       - name: Upload web demo bundle
         uses: actions/upload-artifact@v4
