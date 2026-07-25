@@ -76,7 +76,8 @@ jobs:
             libglew-dev \
             liblapacke-dev \
             libopenblas-dev \
-            libxmu-dev
+            libxmu-dev \
+            xvfb
 
       - name: Configure Cg-free reduced demo
         run: >-
@@ -89,3 +90,25 @@ jobs:
 
       - name: Build Cg-free reduced demo
         run: cmake --build build-reduced-demo --target reducedDynamicSolver-rt --parallel
+
+      - name: Run simpleBridge demo smoke test
+        working-directory: src/util/reducedDynamicSolver-rt
+        run: |
+          set +e
+          timeout 10s xvfb-run -a ../../../build-reduced-demo/bin/reducedDynamicSolver-rt \
+            realtime/simpleBridge/simpleBridge.config 2>&1 | tee simpleBridge.log
+          demo_status=${PIPESTATUS[0]}
+          set -e
+          test "$demo_status" -eq 124
+          grep -F "Starting application." simpleBridge.log
+          grep -F "System lowest frequency is:" simpleBridge.log
+
+      - name: Upload reduced demo bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: reduced-stvk-bridge-linux-x64
+          path: |
+            build-reduced-demo/bin/reducedDynamicSolver-rt
+            build-reduced-demo/lib
+            src/util/reducedDynamicSolver-rt/realtime
+          if-no-files-found: error
