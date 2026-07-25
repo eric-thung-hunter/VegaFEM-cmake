@@ -120,13 +120,10 @@ jobs:
           if-no-files-found: error
 
   modern-backend-toolchain:
-    name: Linux modern SDL2/Vulkan/SYCL toolchain check
+    name: Linux modern SDL2/Vulkan/OpenCL toolchain check
     runs-on: ubuntu-latest
-    # Intel publishes this image with the DPC++ compiler and SYCL runtime.
-    # The hosted runner is intentionally used only for a compile/runtime
-    # smoke test; physical Intel-GPU performance tests belong on a
-    # self-hosted runner with /dev/dri access.
-    container: intel/oneapi-toolkit:2026.1.0-devel-ubuntu24.04
+    # Hosted CI validates the OpenCL ABI using PoCL. Intel NEO runtime/GPU
+    # tests belong on a self-hosted runner with /dev/dri access.
 
     steps:
       - name: Check out source
@@ -138,19 +135,16 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             cmake ninja-build pkg-config libsdl2-dev libvulkan-dev \
-            mesa-vulkan-drivers ocl-icd-opencl-dev
+            mesa-vulkan-drivers ocl-icd-opencl-dev pocl-opencl-icd
 
-      - name: Configure modern backend check with icpx
+      - name: Configure modern backend check
         shell: bash
         run: |
           cmake -S . -B build-modern -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=icx \
-            -DCMAKE_CXX_COMPILER=icpx \
             -DVegaFEM_BUILD_MODEL_REDUCTION=OFF \
             -DVegaFEM_ENABLE_OpenGL_SUPPORT=OFF \
             -DVegaFEM_ENABLE_PTHREADS_SUPPORT=OFF \
-            -DVegaFEM_ENABLE_SYCL_SUPPORT=ON \
             -DVegaFEM_BUILD_MODERN_BACKEND_CHECK=ON \
             -DVegaFEM_BUILD_UTILITIES=ON
 
@@ -159,23 +153,11 @@ jobs:
         run: |
           cmake --build build-modern --target vegaModernBackendCheck --parallel
 
-      - name: Bundle modern backend executable and oneAPI runtime
+      - name: Bundle modern backend executable
         shell: bash
         run: |
           mkdir -p modern-backend-bundle/runtime-libs
           cp -L build-modern/bin/vegaModernBackendCheck modern-backend-bundle/
-          # Bundle the Intel runtime libraries so this CI-built probe can be
-          # downloaded and executed on a compatible Linux workstation.
-          ldd build-modern/bin/vegaModernBackendCheck \
-            | awk '/=> \/opt\/intel\// {print $3} /^\/opt\/intel\// {print $1}' \
-            | sort -u \
-            | while read -r library; do cp -L "$library" modern-backend-bundle/runtime-libs/; done
-          find /opt/intel/oneapi/compiler/2026.1/lib -maxdepth 1 -type f \
-            \( -name 'libsycl.so*' -o -name 'libur_*.so*' -o -name 'libpi_*.so*' \
-               -o -name 'libOpenCL.so*' -o -name 'libintelocl.so*' \
-               -o -name 'libtbb.so*' -o -name 'libumf.so*' \
-               -o -name 'libur_adapter_native_cpu.so*' \) \
-            -exec cp -L {} modern-backend-bundle/runtime-libs/ \;
 
       - name: Upload modern backend bundle
         uses: actions/upload-artifact@v4

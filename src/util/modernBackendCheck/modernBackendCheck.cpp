@@ -3,12 +3,11 @@
 // A deliberately small, headless validation target for the modern backend.
 // It exercises the same compiler/linker/runtime boundary that the full
 // simulator will use: SDL2 for platform integration, Vulkan for rendering,
-// and SYCL for Intel CPU/GPU compute.  Keeping this check headless makes it
+// and OpenCL for Intel GPU compute.  Keeping this check headless makes it
 // suitable for hosted CI, where no physical Intel GPU is guaranteed.
 
 #include <SDL.h>
 #include <vulkan/vulkan.h>
-#include <sycl/sycl.hpp>
 #include <CL/cl.h>
 
 #include <cstdlib>
@@ -25,45 +24,6 @@ void checkVk(VkResult result, const char *operation)
   if (result != VK_SUCCESS)
     throw std::runtime_error(std::string(operation) + " failed with VkResult " +
                              std::to_string(static_cast<int>(result)));
-}
-
-void checkSycl()
-{
-  const auto devices = sycl::device::get_devices();
-  if (devices.empty())
-    throw std::runtime_error("SYCL runtime reported no devices");
-
-  std::cout << "SYCL devices: " << devices.size() << '\n';
-  for (const auto &device : devices)
-  {
-    std::cout << "  - " << device.get_info<sycl::info::device::name>()
-              << " ("
-              << (device.is_gpu() ? "GPU" : device.is_cpu() ? "CPU" : "other")
-              << ")\n";
-  }
-
-  // The default selector lets hosted CI use the Intel CPU device while an
-  // Intel GPU runner naturally selects its GPU.  The production simulator
-  // will expose an explicit device-selection policy.
-  sycl::queue queue{sycl::default_selector_v};
-  constexpr std::size_t count = 256;
-  std::vector<int> values(count, 0);
-  {
-    sycl::buffer<int> buffer(values.data(), sycl::range<1>(count));
-    queue.submit([&](sycl::handler &handler) {
-      auto data = buffer.get_access<sycl::access::mode::write>(handler);
-      handler.parallel_for(sycl::range<1>(count), [=](sycl::id<1> id) {
-        data[id] = static_cast<int>(id[0] * 3 + 1);
-      });
-    });
-    queue.wait_and_throw();
-  }
-  for (std::size_t i = 0; i < count; ++i)
-    if (values[i] != static_cast<int>(i * 3 + 1))
-      throw std::runtime_error("SYCL validation kernel returned incorrect data");
-
-  std::cout << "SYCL validation device: "
-            << queue.get_device().get_info<sycl::info::device::name>() << '\n';
 }
 
 bool checkOpenCL()
@@ -163,19 +123,9 @@ int main()
               << static_cast<int>(version.minor) << '.'
               << static_cast<int>(version.patch) << '\n';
     checkVulkan();
-    bool syclAvailable = false;
-    try
-    {
-      checkSycl();
-      syclAvailable = true;
-    }
-    catch (const std::exception &error)
-    {
-      std::cerr << "SYCL unavailable: " << error.what() << '\n';
-    }
     const bool openclAvailable = checkOpenCL();
-    if (!syclAvailable && !openclAvailable)
-      throw std::runtime_error("neither SYCL nor OpenCL reported a compute device");
+    if (!openclAvailable)
+      throw std::runtime_error("OpenCL reported no compute device");
   }
   catch (const std::exception &error)
   {

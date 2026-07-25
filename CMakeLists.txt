@@ -51,14 +51,6 @@ if (VegaFEM_ENABLE_OpenGL_SUPPORT)
 endif()
 
 if (VegaFEM_BUILD_MODERN_BACKEND_CHECK)
-  if (NOT VegaFEM_ENABLE_SYCL_SUPPORT)
-    message(FATAL_ERROR
-      "VegaFEM_BUILD_MODERN_BACKEND_CHECK requires VegaFEM_ENABLE_SYCL_SUPPORT=ON")
-  endif()
-  if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
-    message(FATAL_ERROR
-      "The modern backend requires IntelLLVM/icpx. Configure with -DCMAKE_CXX_COMPILER=icpx")
-  endif()
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
   find_package(Vulkan REQUIRED)
