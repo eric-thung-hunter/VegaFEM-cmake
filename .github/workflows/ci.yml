@@ -95,7 +95,8 @@ jobs:
         working-directory: src/util/reducedDynamicSolver-rt
         run: |
           set +e
-          timeout 10s xvfb-run -a ../../../build-reduced-demo/bin/reducedDynamicSolver-rt \
+          timeout 10s xvfb-run -a stdbuf -oL -eL \
+            ../../../build-reduced-demo/bin/reducedDynamicSolver-rt \
             realtime/simpleBridge/simpleBridge.config 2>&1 | tee simpleBridge.log
           demo_status=${PIPESTATUS[0]}
           set -e
