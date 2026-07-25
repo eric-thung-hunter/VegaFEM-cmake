@@ -44,7 +44,6 @@
 #endif
 
 #include "openGL-headers.h"
-#include "GL/glui.h"
 #include "camera.h"
 
 void initGLUT(int argc, char* argv[], char * windowTitle, 
@@ -66,4 +65,3 @@ void drawAxes(double axisLength);
 void buildSphereDisplayList(GLuint * solidSphereList, GLuint * wireSphereList);
 
 #endif
-

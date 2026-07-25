@@ -38,6 +38,7 @@
 
 #include "initGraphics.h"
 #include "macros.h"
+#include <cstdio>
 
 extern void displayFunction(void);
 extern void idleFunction(void);
@@ -60,12 +61,10 @@ void initGLUT(int argc, char* argv[], char * windowTitle,
   // Setup GLUT callbacks.
   glutDisplayFunc(displayFunction); 
 
-  GLUI_Master.set_glutIdleFunc(idleFunction);
-  //glutIdleFunc(idleFunction);
-
-  GLUI_Master.set_glutKeyboardFunc(keyboardFunction);
-  GLUI_Master.set_glutReshapeFunc(reshape);
-  GLUI_Master.set_glutMouseFunc(mouseButtonActivityFunction);
+  glutIdleFunc(idleFunction);
+  glutKeyboardFunc(keyboardFunction);
+  glutReshapeFunc(reshape);
+  glutMouseFunc(mouseButtonActivityFunction);
     
   glutMotionFunc(mouseMotionFunction);
 
@@ -160,4 +159,3 @@ void drawAxes(double axisLength)
   } 
   glEnd();
 }
-

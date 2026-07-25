@@ -111,7 +111,9 @@ jobs:
           test "$demo_status" -eq 124
           grep -F "Starting application." simpleBridge.log
           grep -F "Graphics initialization complete." simpleBridge.log
+          grep -F "Dear ImGui controls initialized." simpleBridge.log
           grep -F "Building the reduced stiffness matrix quadratic polynomials... r is 20" simpleBridge.log
+          ! ldd ../../../build-reduced-demo/bin/reducedDynamicSolver-rt | grep -F "libglui"
 
       - name: Upload reduced demo bundle
         uses: actions/upload-artifact@v4

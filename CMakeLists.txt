@@ -6,7 +6,7 @@
 # Vega FEM software package.
 
 # Minimum required version of CMake
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.14)
 project(VegaFEM)
 set(VegaFEM_VERSION 2.0)
 if(COMMAND CMAKE_POLICY)

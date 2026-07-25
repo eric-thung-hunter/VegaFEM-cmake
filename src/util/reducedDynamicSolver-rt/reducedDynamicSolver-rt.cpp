@@ -39,9 +39,7 @@
   St.Venant-Kirchhoff Deformable Models, ACM Transactions on Graphics 24(3) 
   (SIGGRAPH 2005), p. 982-990, Los Angeles, CA, August 2005
 
-  This code requires "GLUI", a LGPL-licensed GLUT-based UI library:
-  http://glui.sourceforge.net/
-  http://www.cs.unc.edu/~rademach/glui/
+  The controls are rendered in the main OpenGL window with Dear ImGui.
 */
 
 #include <stdlib.h>
@@ -72,7 +70,9 @@ using namespace std;
 #include "reducedStVKForceModel.h"
 #include "reducedLinearStVKForceModel.h"
 #include "configFile.h"
-#include "GL/glui.h"
+#include "imgui.h"
+#include "imgui_impl_glut.h"
+#include "imgui_impl_opengl2.h"
 #include "lighting.h"
 #include "matrixIO.h"
 
@@ -161,18 +161,16 @@ float dampingMassCoef;
 float dampingStiffnessCoef;
 char backgroundColorString[4096] = "255 255 255";
 
-GLUI * glui;
-GLUI_Spinner * timeStep_spinner;
-#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
-GLUI_Checkbox * renderOnGPU_checkbox;
-#endif
 float deformableObjectCompliance = 1.0;
 float baseFrequency = 1.0;
 int sceneID=0;
+bool showControls = true;
 
 void callAllUICallBacks();
 void cleanupScene();
-void Sync_GLUI();
+void SyncUI();
+void initImGui();
+void renderImGuiControls();
 
 int developerMode = 0;
 string configFilename;
@@ -195,6 +193,10 @@ void print_bitmap_string(float x,float y, float z, void *font, char* s)
 // called periodically by GLUT (the main graphics function)
 void displayFunction(void)
 {
+  ImGui_ImplOpenGL2_NewFrame();
+  ImGui_ImplGLUT_NewFrame();
+  ImGui::NewFrame();
+
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
   // Setup model transformations.
@@ -290,6 +292,10 @@ void displayFunction(void)
     Y1 = -1 + 2.0 * y1 / windowHeight;
     print_bitmap_string(X1,Y1,-1,GLUT_BITMAP_9_BY_15 ,s);
   }
+
+  renderImGuiControls();
+  ImGui::Render();
+  ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
 
   glPopMatrix(); 
   glMatrixMode(GL_MODELVIEW); 
@@ -398,7 +404,7 @@ void idleFunction(void)
     {
       timeStep = 1.0 / fps;
       implicitNewmarkDense->SetTimestep(timeStep / substepsPerTimeStep);
-      Sync_GLUI();
+      SyncUI();
     }
   }
 
@@ -411,6 +417,10 @@ void idleFunction(void)
 
 void keyboardFunction (unsigned char key, int x, int y)
 {
+  ImGui_ImplGLUT_KeyboardFunc(key, x, y);
+  if (ImGui::GetIO().WantCaptureKeyboard)
+    return;
+
   double cameraX,cameraY,cameraZ;
 
   switch (key)
@@ -485,11 +495,17 @@ void keyboardFunction (unsigned char key, int x, int y)
     case '0':
       stopDeformations_buttonCallBack(0);
       break;
+
+    case 'h':
+      showControls = !showControls;
+      break;
   }
 }
 
 void reshape(int x, int y)
 {
+  ImGui_ImplGLUT_ReshapeFunc(x, y);
+
   glViewport(0,0,x,y);
 
   windowWidth = x;
@@ -509,10 +525,20 @@ void exitHandler()
   printf("Executing the exit handler...\n");
   printf("De-allocating data structures...\n");
   cleanupScene();
+  if (ImGui::GetCurrentContext() != NULL)
+  {
+    ImGui_ImplOpenGL2_Shutdown();
+    ImGui_ImplGLUT_Shutdown();
+    ImGui::DestroyContext();
+  }
 }
 
 void mouseMotionFunction(int x, int y)
 {
+  ImGui_ImplGLUT_MotionFunc(x, y);
+  if (ImGui::GetIO().WantCaptureMouse)
+    return;
+
   int mouseDeltaX = x-g_vMousePos[0];
   int mouseDeltaY = y-g_vMousePos[1];
 
@@ -539,6 +565,10 @@ void mouseMotionFunction(int x, int y)
 
 void mouseButtonActivityFunction(int button, int state, int x, int y)
 {
+  ImGui_ImplGLUT_MouseFunc(button, state, x, y);
+  if (ImGui::GetIO().WantCaptureMouse)
+    return;
+
   switch (button)
   {
     case GLUT_LEFT_BUTTON:
@@ -758,7 +788,7 @@ void initScene()
   sscanf(backgroundColorString, "%d %d %d", &colorR, &colorG, &colorB);
   glClearColor(1.0 * colorR / 255, 1.0 * colorG / 255, 1.0 * colorB / 255, 0.0);
 
-  Sync_GLUI();
+  SyncUI();
   callAllUICallBacks();
 
 }
@@ -827,9 +857,9 @@ void initConfigurations()
   configFile.printOptions();
 }
 
-void Sync_GLUI()
+void SyncUI()
 {
-  glui->sync_live();
+  // Dear ImGui reads the live simulation values directly every frame.
 }
 
 void displayContactInfoCallBack(int code)
@@ -847,8 +877,6 @@ void deformableObjectCompliance_spinnerCallBack(int code)
 {
   if (deformableObjectCompliance < 0)
     deformableObjectCompliance = 0;
-
-  glui->sync_live();
 }
 
 void timeStep_spinnerCallBack(int code)
@@ -858,23 +886,16 @@ void timeStep_spinnerCallBack(int code)
 
   implicitNewmarkDense->SetTimestep(timeStep / substepsPerTimeStep);
 
-  glui->sync_live();
 }
 
 void syncTimeStepWithGraphics_checkboxCallBack(int code)
 {
-  if (syncTimeStepWithGraphics)
-    timeStep_spinner->disable();
-  else
-    timeStep_spinner->enable();
 }
 
 void baseFrequency_spinnerCallBack(int code)
 {
   if (baseFrequency < 0)
     baseFrequency = 0;
-
-  glui->sync_live();
 
   implicitNewmarkDense->SetInternalForceScalingFactor(baseFrequency * baseFrequency);
 }
@@ -898,7 +919,6 @@ void newmarkBeta_spinnerCallBack(int code)
   implicitNewmarkDense->SetNewmarkBeta(newmarkBeta);
   implicitNewmarkDense->SetNewmarkGamma(newmarkGamma);
 
-  glui->sync_live();
 }
 
 void newmarkGamma_spinnerCallBack(int code)
@@ -915,7 +935,6 @@ void newmarkGamma_spinnerCallBack(int code)
   implicitNewmarkDense->SetNewmarkBeta(newmarkBeta);
   implicitNewmarkDense->SetNewmarkGamma(newmarkGamma);
 
-  glui->sync_live();
 }
 
 void newmark_checkboxuse1DNewmarkParameterFamilyCallBack(int code)
@@ -927,7 +946,6 @@ void newmark_checkboxuse1DNewmarkParameterFamilyCallBack(int code)
     implicitNewmarkDense->SetNewmarkGamma(newmarkGamma);
   }
 
-  glui->sync_live();
 }
 
 
@@ -938,7 +956,6 @@ void rayleighMass_spinnerCallBack(int code)
 
   implicitNewmarkDense->SetDampingMassCoef(dampingMassCoef);
 
-  glui->sync_live();
 }
 
 void rayleighStiffness_spinnerCallBack(int code)
@@ -948,7 +965,6 @@ void rayleighStiffness_spinnerCallBack(int code)
 
   implicitNewmarkDense->SetDampingStiffnessCoef(dampingStiffnessCoef);
 
-  glui->sync_live();
 }
 
 void timeStepSubdivisions_spinnerCallBack(int code)
@@ -957,8 +973,6 @@ void timeStepSubdivisions_spinnerCallBack(int code)
     substepsPerTimeStep = 1;
 
   implicitNewmarkDense->SetTimestep(timeStep / substepsPerTimeStep); 
-
-  glui->sync_live();
 }
 
 void renderOnGPU_checkBoxCallBack(int code)
@@ -1002,7 +1016,7 @@ void exit_buttonCallBack(int code)
   exit(0);
 }
 
-// calls all GLUI callbacks, except the listBox callbacks
+// Applies the configuration values to the simulation after scene creation.
 void callAllUICallBacks()
 {
   deformableObjectCompliance_spinnerCallBack(0);
@@ -1018,97 +1032,110 @@ void callAllUICallBacks()
   newmark_checkboxuse1DNewmarkParameterFamilyCallBack(0);
 }
 
-void initGLUI()
+void initImGui()
 {
-  // generate the UI
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::StyleColorsDark();
+  ImGui_ImplGLUT_Init();
+  ImGui_ImplOpenGL2_Init();
+  printf("Dear ImGui controls initialized.\n");
+}
 
-  glui = GLUI_Master.create_glui("Controls", 0, windowWidth + 10, 0);
+void renderImGuiControls()
+{
+  if (!showControls)
+    return;
 
-  glui->add_spinner("Deformable object compliance:", GLUI_SPINNER_FLOAT, &deformableObjectCompliance, 0, deformableObjectCompliance_spinnerCallBack );
+  ImGui::SetNextWindowPos(ImVec2(12.0f, 12.0f), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(340.0f, 0.0f), ImGuiCond_FirstUseEver);
+  if (!ImGui::Begin("Bridge controls", &showControls, ImGuiWindowFlags_AlwaysAutoResize))
+  {
+    ImGui::End();
+    return;
+  }
 
-  glui->add_spinner("Frequency scaling:", GLUI_SPINNER_FLOAT, &baseFrequency, 0, baseFrequency_spinnerCallBack);
+  if (ImGui::DragFloat("Compliance", &deformableObjectCompliance, 100.0f, 0.0f))
+    deformableObjectCompliance_spinnerCallBack(0);
+  if (ImGui::DragFloat("Frequency scaling", &baseFrequency, 0.01f, 0.0f))
+    baseFrequency_spinnerCallBack(0);
 
-  // ******** newmark beta, gamma ********
-  
-  GLUI_Panel * newmark_panel =
-    glui->add_panel("Newmark integrator parameters", GLUI_PANEL_EMBOSSED);
-  newmark_panel->set_alignment(GLUI_ALIGN_LEFT);
-  
-  glui->add_checkbox_to_panel(newmark_panel, "Link Beta and Gamma", 
-    &use1DNewmarkParameterFamily, 0, newmark_checkboxuse1DNewmarkParameterFamilyCallBack);
+  if (ImGui::CollapsingHeader("Integrator", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    bool linked = use1DNewmarkParameterFamily != 0;
+    if (ImGui::Checkbox("Link beta and gamma", &linked))
+    {
+      use1DNewmarkParameterFamily = linked ? 1 : 0;
+      newmark_checkboxuse1DNewmarkParameterFamilyCallBack(0);
+    }
+    if (ImGui::SliderFloat("Beta", &newmarkBeta, 0.0f, 0.5f))
+      newmarkBeta_spinnerCallBack(0);
+    if (ImGui::SliderFloat("Gamma", &newmarkGamma, 0.5f, 1.0f))
+      newmarkGamma_spinnerCallBack(0);
 
-  GLUI_Spinner * newmarkBeta_spinner = 
-    glui->add_spinner_to_panel(newmark_panel,"Beta", GLUI_SPINNER_FLOAT,
-      &newmarkBeta, 0, newmarkBeta_spinnerCallBack);
-  newmarkBeta_spinner->set_speed(0.1);
+    bool staticOnly = staticSolver != 0;
+    if (ImGui::Checkbox("Static solver only", &staticOnly))
+    {
+      staticSolver = staticOnly ? 1 : 0;
+      staticSolver_checkboxCallBack(0);
+    }
 
-  GLUI_Spinner * newmarkGamma_spinner = 
-    glui->add_spinner_to_panel(newmark_panel,"Gamma", GLUI_SPINNER_FLOAT,
-      &newmarkGamma, 0, newmarkGamma_spinnerCallBack);
-  newmarkGamma_spinner->set_speed(0.1);
+    bool linearModel = forceModel != 0;
+    if (ImGui::Checkbox("Linear reduced model", &linearModel))
+    {
+      forceModel = linearModel ? 1 : 0;
+      forceModel_checkBoxCallBack(0);
+    }
+  }
 
-    glui->add_checkbox_to_panel(newmark_panel,"Static solver only", &staticSolver, 0, staticSolver_checkboxCallBack);
+  if (ImGui::CollapsingHeader("Damping", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (ImGui::DragFloat("Mass-proportional", &dampingMassCoef, 0.001f, 0.0f))
+      rayleighMass_spinnerCallBack(0);
+    if (ImGui::DragFloat("Stiffness-proportional", &dampingStiffnessCoef, 0.001f, 0.0f))
+      rayleighStiffness_spinnerCallBack(0);
+  }
 
-  glui->add_checkbox_to_panel(newmark_panel, "Linear reduced model", &forceModel, 0, forceModel_checkBoxCallBack);
-
-  // ******** damping ********
-
-  GLUI_Panel * damping_panel =
-    glui->add_panel("Tangential Rayleigh Damping", GLUI_PANEL_EMBOSSED);
-  damping_panel->set_alignment(GLUI_ALIGN_LEFT);
-
-  glui->add_spinner_to_panel(damping_panel,"Mass-proportional", GLUI_SPINNER_FLOAT,
-      &dampingMassCoef, 0, rayleighMass_spinnerCallBack);
-
-  glui->add_spinner_to_panel(damping_panel,"Stiffness-proportional", GLUI_SPINNER_FLOAT,
-      &dampingStiffnessCoef, 0, rayleighStiffness_spinnerCallBack);
-
-  glui->add_button("Stop deformations", 0, stopDeformations_buttonCallBack);
-
-  // ******** timestep control ********
-
-  GLUI_Panel * timeStep_panel =
-    glui->add_panel("Timestep control", GLUI_PANEL_EMBOSSED);
-  timeStep_panel->set_alignment(GLUI_ALIGN_LEFT);
-
-  glui->add_checkbox_to_panel(timeStep_panel, "Sync with graphics", 
-    &syncTimeStepWithGraphics, 0, syncTimeStepWithGraphics_checkboxCallBack);
-
-  timeStep_spinner = 
-    glui->add_spinner_to_panel(timeStep_panel,"Timestep [sec]", GLUI_SPINNER_FLOAT,
-      &timeStep, 0, timeStep_spinnerCallBack);
-  timeStep_spinner->set_alignment(GLUI_ALIGN_LEFT);
-
-  if (syncTimeStepWithGraphics)
-    timeStep_spinner->disable();
-
-  glui->add_spinner_to_panel(timeStep_panel,"Substeps per timestep", GLUI_SPINNER_INT, &substepsPerTimeStep, 0, timeStepSubdivisions_spinnerCallBack);
+  if (ImGui::CollapsingHeader("Timestep", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    bool sync = syncTimeStepWithGraphics != 0;
+    if (ImGui::Checkbox("Sync with graphics", &sync))
+    {
+      syncTimeStepWithGraphics = sync ? 1 : 0;
+      syncTimeStepWithGraphics_checkboxCallBack(0);
+    }
+    ImGui::BeginDisabled(sync);
+    if (ImGui::DragFloat("Timestep (seconds)", &timeStep, 0.0001f, 0.0f, 1.0f, "%.5f"))
+      timeStep_spinnerCallBack(0);
+    ImGui::EndDisabled();
+    if (ImGui::DragInt("Substeps", &substepsPerTimeStep, 1.0f, 1, 100))
+      timeStepSubdivisions_spinnerCallBack(0);
+  }
 
 #ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
-  renderOnGPU_checkbox = 
-    glui->add_checkbox("Compute u=Uq on GPU", &renderOnGPU, 0, renderOnGPU_checkBoxCallBack);
+  bool gpuDeformer = renderOnGPU != 0;
+  if (ImGui::Checkbox("Compute u = Uq on GPU", &gpuDeformer))
+  {
+    renderOnGPU = gpuDeformer ? 1 : 0;
+    renderOnGPU_checkBoxCallBack(0);
+  }
+#else
+  ImGui::TextDisabled("CPU deformation path (Cg removed)");
 #endif
 
-  glui->add_separator();
+  if (ImGui::Button("Stop deformations"))
+    stopDeformations_buttonCallBack(0);
+  ImGui::SameLine();
+  if (ImGui::Button("Reset camera"))
+    camera->Reset();
 
-  GLUI_Panel * instructions_panel = glui->add_panel("Mouse buttons:", GLUI_PANEL_EMBOSSED);
-  instructions_panel->set_alignment(GLUI_ALIGN_LEFT);
-  glui->add_statictext_to_panel(instructions_panel, "Left + drag: apply force");
-  glui->add_statictext_to_panel(instructions_panel, "Middle + drag: zoom in/out");
-  glui->add_statictext_to_panel(instructions_panel, "Right + drag: rotate camera");
- 
-  glui->add_separator();
+  ImGui::Separator();
+  ImGui::TextUnformatted("Left-drag on mesh: apply force");
+  ImGui::TextUnformatted("Middle-drag: zoom | Right-drag: rotate");
+  ImGui::TextUnformatted("W: wireframe | H: toggle this overlay | Esc: exit");
+  ImGui::Text("%.1f Hz | CPU deformation load: %.0f%%", fps, cpuLoad * 100.0);
 
-  glui->add_statictext("Jernej Barbic and Doug James");
-  glui->add_statictext("Carnegie Mellon University, Cornell, 2007");
-
-  glui->add_separator();
-
-  glui->add_button("Exit program", 0, exit_buttonCallBack);
-
-  Sync_GLUI();
-
-  glui->set_main_gfx_window( windowID );
+  ImGui::End();
 }
 
 int main(int argc, char* argv[])
@@ -1132,15 +1159,9 @@ int main(int argc, char* argv[])
   initGLUT(argc, argv, windowTitleBase , windowWidth, windowHeight, &windowID);
   initGraphics(windowWidth, windowHeight);
 
-  initGLUI();
+  initImGui();
 
   initScene();
-
-  // Disable the GPU UI switch if no GPU support for vertex texture fetches.
-#ifdef VEGAFEM_ENABLE_CG_GPU_DEFORMER
-  if (deformableObjectRenderingMeshGPU == NULL)
-    renderOnGPU_checkbox->disable();
-#endif
 
   glutMainLoop(); 
 
