@@ -29,13 +29,24 @@ struct ReducedSimulation
   int renderingRows = 0;
   int quadraticSize = 0;
   int cubicSize = 0;
-  double externalForce = 0.0;
+  int pulledVertex = -1;
+  std::array<double, 3> pullVector{};
+  // This is deliberately normalized for the browser's explicit microstep
+  // integrator. The native 33605.2 scene value is paired with implicit
+  // Newmark; applying it directly here would make a pointer drag unstable.
+  double compliance = 100.0;
+  double baseFrequency = 0.25;
+  double massDamping = 0.0;
+  double stiffnessDamping = 0.003;
+  bool useLinearModel = false;
+  bool staticOnly = false;
 
   void reset()
   {
     q.fill(0.0);
     qdot.fill(0.0);
-    externalForce = 0.0;
+    pulledVertex = -1;
+    pullVector.fill(0.0);
   }
 
   bool setModalBasis(const float * basis, int rows, int modes)
@@ -89,7 +100,8 @@ struct ReducedSimulation
     return true;
   }
 
-  void evaluateStVKInternalForces(std::array<double, kModeCount> & forces)
+  void evaluateStVKInternalForces(const std::array<double, kModeCount> & state,
+    std::array<double, kModeCount> & forces, bool includeNonlinear)
   {
     forces.fill(0.0);
     if (linearCoefficients.empty())
@@ -97,12 +109,15 @@ struct ReducedSimulation
 
     for (std::size_t output = 0; output < kModeCount; ++output)
       for (std::size_t input = 0; input < kModeCount; ++input)
-        forces[output] += linearCoefficients[output * kModeCount + input] * q[input];
+        forces[output] += linearCoefficients[output * kModeCount + input] * state[input];
+
+    if (!includeNonlinear)
+      return;
 
     std::size_t qiqjIndex = 0;
     for (std::size_t i = 0; i < kModeCount; ++i)
       for (std::size_t j = i; j < kModeCount; ++j)
-        qiqj[qiqjIndex++] = q[i] * q[j];
+        qiqj[qiqjIndex++] = state[i] * state[j];
 
     for (std::size_t output = 0; output < kModeCount; ++output)
       for (int index = 0; index < quadraticSize; ++index)
@@ -119,7 +134,7 @@ struct ReducedSimulation
         const std::size_t coefficientOffset = output * cubicSize + cubicOffset;
         for (int index = 0; index < size; ++index)
           contribution += cubicCoefficients[coefficientOffset + index] * qiqj[static_cast<std::size_t>(qiqjOffset + index)];
-        forces[output] += q[i] * contribution;
+        forces[output] += state[i] * contribution;
       }
       const int remaining = static_cast<int>(kModeCount - i);
       size -= remaining;
@@ -152,7 +167,10 @@ struct ReducedSimulation
     // tab resumes) are integrated in fixed microsteps instead of destabilizing
     // the reduced state in one large Euler step.
     const double clampedDelta = std::max(0.0, std::min(frameDeltaSeconds, 0.05));
-    const int substeps = std::max(1, static_cast<int>(std::ceil(clampedDelta / (1.0 / 240.0))));
+    // The native demo uses implicit Newmark.  This compact browser kernel uses
+    // semi-implicit Euler, so it takes sufficiently small microsteps to keep
+    // the stiff Bridge polynomial stable while a user pulls on a vertex.
+    const int substeps = std::max(1, static_cast<int>(std::ceil(clampedDelta / (1.0 / 1200.0))));
     const double dt = clampedDelta / static_cast<double>(substeps);
 
     for (int substep = 0; substep < substeps; ++substep)
@@ -160,16 +178,34 @@ struct ReducedSimulation
       if (!linearCoefficients.empty())
       {
         std::array<double, kModeCount> internalForces;
-        evaluateStVKInternalForces(internalForces);
+        std::array<double, kModeCount> externalForces{};
+        evaluateStVKInternalForces(q, internalForces, !useLinearModel);
+
+        // This is ModalMatrix::ProjectSingleVertex from the native driver:
+        // fq = U_vertex^T * (compliance * screen-space pull direction).
+        if (pulledVertex >= 0 && 3 * pulledVertex + 2 < renderingRows)
+        {
+          const int row = 3 * pulledVertex;
+          for (std::size_t mode = 0; mode < kModeCount; ++mode)
+          {
+            const std::size_t offset = static_cast<std::size_t>(row) + mode * renderingRows;
+            externalForces[mode] = compliance * (
+              static_cast<double>(renderingBasis[offset]) * pullVector[0] +
+              static_cast<double>(renderingBasis[offset + 1]) * pullVector[1] +
+              static_cast<double>(renderingBasis[offset + 2]) * pullVector[2]);
+          }
+        }
         for (std::size_t mode = 0; mode < kModeCount; ++mode)
         {
-          const double modeNumber = static_cast<double>(mode + 1);
-          const double modalForce = 0.10 * externalForce * std::exp(-0.35 * modeNumber);
-          // simpleBridge.config sets baseFrequency=0.25, so this matches the
-          // native driver's internal-force scale. Semi-implicit integration is
-          // intentionally used here to avoid a BLAS/LAPACK dependency on iOS.
-          const double acceleration = modalForce - 0.0625 * internalForces[mode] - 0.003 * qdot[mode];
+          const double acceleration = externalForces[mode] - baseFrequency * baseFrequency * internalForces[mode] -
+            // Native uses implicit Newmark for the K*qdot Rayleigh term.  An
+            // explicit version is unstable for this stiff Bridge polynomial,
+            // so retain the user-facing coefficient as a stable modal-drag
+            // approximation in the portable browser integrator.
+            (massDamping + 30.0 * stiffnessDamping) * qdot[mode];
           qdot[mode] += dt * acceleration;
+          if (staticOnly)
+            qdot[mode] *= 0.08;
           q[mode] += dt * qdot[mode];
         }
       }
@@ -179,7 +215,7 @@ struct ReducedSimulation
         for (std::size_t mode = 0; mode < kModeCount; ++mode)
         {
           const double frequency = 5.0 + static_cast<double>(mode + 1) * 1.65;
-          qdot[mode] += dt * (externalForce * std::exp(-0.17 * static_cast<double>(mode + 1)) - frequency * frequency * q[mode]);
+          qdot[mode] += dt * (-frequency * frequency * q[mode]);
           q[mode] += dt * qdot[mode];
         }
       }
@@ -219,8 +255,34 @@ void vegafem_web_step(void *, double frameDeltaSeconds)
 
 void vegafem_web_set_force(void *, double normalizedForce)
 {
-  // Prevent accidental huge impulses from pointer-coordinate glitches.
-  g_simulation.externalForce = std::max(-30.0, std::min(normalizedForce, 30.0));
+  // Compatibility entry point for older hosts. New hosts use a picked vertex.
+  g_simulation.pulledVertex = 0;
+  g_simulation.pullVector = {{std::max(-30.0, std::min(normalizedForce, 30.0)), 0.0, 0.0}};
+}
+
+void vegafem_web_set_pull(void *, int vertex, double x, double y, double z)
+{
+  g_simulation.pulledVertex = vertex;
+  g_simulation.pullVector = {{x, y, z}};
+}
+
+void vegafem_web_clear_pull(void *)
+{
+  g_simulation.pulledVertex = -1;
+  g_simulation.pullVector.fill(0.0);
+}
+
+void vegafem_web_set_parameter(void *, int parameter, double value)
+{
+  switch (parameter)
+  {
+    case 0: g_simulation.compliance = std::max(0.0, std::min(value, 2000.0)); break;
+    case 1: g_simulation.baseFrequency = std::max(0.0, std::min(value, 2.0)); break;
+    case 2: g_simulation.massDamping = std::max(0.0, std::min(value, 10.0)); break;
+    case 3: g_simulation.stiffnessDamping = std::max(0.0, std::min(value, 0.1)); break;
+    case 4: g_simulation.useLinearModel = value != 0.0; break;
+    case 5: g_simulation.staticOnly = value != 0.0; break;
+  }
 }
 
 const double * vegafem_web_modal_state(void *)

@@ -5,15 +5,35 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const canvas = document.querySelector('#simulation');
 const status = document.querySelector('#renderer-status');
 const failure = document.querySelector('#failure');
-const forceScale = document.querySelector('#force-scale');
-const forceValue = document.querySelector('#force-value');
 const frameTime = document.querySelector('#frame-time');
 const pauseButton = document.querySelector('#pause');
 const resetButton = document.querySelector('#reset');
+const resetCameraButton = document.querySelector('#reset-camera');
+const panel = document.querySelector('.panel');
+const hidePanelButton = document.querySelector('#hide-panel');
+const showPanelButton = document.querySelector('#show-panel');
+const pullStatus = document.querySelector('#pull-status');
+const compliance = document.querySelector('#compliance');
+const complianceValue = document.querySelector('#compliance-value');
+const frequency = document.querySelector('#frequency');
+const frequencyValue = document.querySelector('#frequency-value');
+const massDamping = document.querySelector('#mass-damping');
+const massDampingValue = document.querySelector('#mass-damping-value');
+const stiffnessDamping = document.querySelector('#stiffness-damping');
+const stiffnessDampingValue = document.querySelector('#stiffness-damping-value');
+const linearModel = document.querySelector('#linear-model');
+const staticOnly = document.querySelector('#static-only');
+const wireframe = document.querySelector('#wireframe');
+const forceMarker = document.querySelector('#force-marker');
 
 let running = true;
 let draggingBridge = false;
 let activePointerId = null;
+let pulledVertex = -1;
+const dragStart = new THREE.Vector2();
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const worldForce = new THREE.Vector3();
 
 function supportsWasmSimd() {
   // i8x16.splat is a minimal feature probe; validate capabilities instead of
@@ -103,18 +123,19 @@ async function loadBridgeAssets() {
 }
 
 function createBridge(scene, data) {
-  const bridge = new THREE.Mesh(
+  const mesh = new THREE.Mesh(
     data.geometry,
     new THREE.MeshStandardMaterial({ color: 0x4e97c7, metalness: 0.2, roughness: 0.55, side: THREE.DoubleSide })
   );
-  bridge.castShadow = true;
-  bridge.receiveShadow = true;
-  bridge.add(new THREE.Mesh(
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  const edges = new THREE.Mesh(
     data.geometry,
     new THREE.MeshBasicMaterial({ color: 0xd0ebfc, wireframe: true, transparent: true, opacity: 0.18 })
-  ));
-  scene.add(bridge);
-  return data;
+  );
+  mesh.add(edges);
+  scene.add(mesh);
+  return { ...data, mesh, edges };
 }
 
 function applyModalDeformation(bridge, displacement, updateNormals) {
@@ -122,6 +143,38 @@ function applyModalDeformation(bridge, displacement, updateNormals) {
   for (let offset = 0; offset < positions.length; ++offset) positions[offset] = bridge.rest[offset] + displacement[offset];
   bridge.positions.needsUpdate = true;
   if (updateNormals) bridge.geometry.computeVertexNormals();
+}
+
+function closestHitVertex(bridge, hit) {
+  const index = bridge.geometry.index;
+  if (!index || hit.faceIndex === undefined) return 0;
+  const offset = hit.faceIndex * 3;
+  const candidates = [index.getX(offset), index.getX(offset + 1), index.getX(offset + 2)];
+  const position = bridge.positions;
+  let result = candidates[0];
+  let distance = Infinity;
+  for (const candidate of candidates) {
+    const dx = position.getX(candidate) - hit.point.x;
+    const dy = position.getY(candidate) - hit.point.y;
+    const dz = position.getZ(candidate) - hit.point.z;
+    const candidateDistance = dx * dx + dy * dy + dz * dz;
+    if (candidateDistance < distance) {
+      result = candidate;
+      distance = candidateDistance;
+    }
+  }
+  return result;
+}
+
+function pickBridgeVertex(event, camera, bridge) {
+  const bounds = canvas.getBoundingClientRect();
+  pointer.set(
+    ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+    -((event.clientY - bounds.top) / bounds.height) * 2 + 1
+  );
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObject(bridge.mesh, false)[0];
+  return hit ? closestHitVertex(bridge, hit) : -1;
 }
 
 async function main() {
@@ -184,35 +237,95 @@ async function main() {
   const displacementPointer = module._vegafem_web_deformed_positions(simulation);
   if (!displacementPointer) throw new Error('The WebAssembly solver could not assemble Bridge displacements.');
   const displacement = module.HEAPF32.subarray(displacementPointer >> 2, (displacementPointer >> 2) + bridge.rows);
-  status.textContent += simd ? ' · SIMD solver' : ' · baseline solver';
+  status.textContent = `${renderer.backend && renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2'} renderer · ${simd ? 'SIMD' : 'baseline'} Wasm solver`;
 
-  forceScale.addEventListener('input', () => { forceValue.value = forceScale.value; });
+  const parameter = (id, output, parameterIndex, formatter) => {
+    const input = document.querySelector(id);
+    const update = () => {
+      output.value = formatter(Number(input.value));
+      module._vegafem_web_set_parameter(simulation, parameterIndex, Number(input.value));
+    };
+    input.addEventListener('input', update);
+    update();
+  };
+  parameter('#compliance', complianceValue, 0, (value) => value.toFixed(0));
+  parameter('#frequency', frequencyValue, 1, (value) => value.toFixed(2));
+  parameter('#mass-damping', massDampingValue, 2, (value) => value.toFixed(3));
+  parameter('#stiffness-damping', stiffnessDampingValue, 3, (value) => value.toFixed(3));
+  linearModel.addEventListener('change', () => module._vegafem_web_set_parameter(simulation, 4, linearModel.checked ? 1 : 0));
+  staticOnly.addEventListener('change', () => module._vegafem_web_set_parameter(simulation, 5, staticOnly.checked ? 1 : 0));
+  wireframe.addEventListener('change', () => { bridge.edges.visible = wireframe.checked; });
+
+  const pulledMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.13, 18, 12),
+    new THREE.MeshBasicMaterial({ color: 0x77ff94 })
+  );
+  const pullArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.1, 0xffd15c, 0.25, 0.14);
+  pulledMarker.visible = false;
+  pullArrow.visible = false;
+  scene.add(pulledMarker, pullArrow);
+  const clearPull = () => {
+    draggingBridge = false;
+    activePointerId = null;
+    pulledVertex = -1;
+    controls.enabled = true;
+    module._vegafem_web_clear_pull(simulation);
+    pulledMarker.visible = false;
+    pullArrow.visible = false;
+    pullStatus.textContent = 'Pick a bridge member to apply force';
+  };
+
   pauseButton.addEventListener('click', () => {
     running = !running;
     pauseButton.textContent = running ? 'Pause' : 'Resume';
-    module._vegafem_web_set_force(simulation, 0);
+    clearPull();
   });
-  resetButton.addEventListener('click', () => module._vegafem_web_reset(simulation));
+  resetButton.addEventListener('click', () => { module._vegafem_web_reset(simulation); clearPull(); });
+  resetCameraButton.addEventListener('click', () => {
+    camera.position.set(0, 6.2, 24.8);
+    controls.target.set(0, 1.2, 0);
+    controls.update();
+  });
+  hidePanelButton.addEventListener('click', () => { panel.hidden = true; showPanelButton.hidden = false; });
+  showPanelButton.addEventListener('click', () => { panel.hidden = false; showPanelButton.hidden = true; });
 
   canvas.addEventListener('pointerdown', (event) => {
     if (event.pointerType === 'touch' && event.isPrimary === false) return;
+    const vertex = pickBridgeVertex(event, camera, bridge);
+    if (vertex < 0) return;
     draggingBridge = true;
     activePointerId = event.pointerId;
+    pulledVertex = vertex;
+    dragStart.set(event.clientX, event.clientY);
     controls.enabled = false;
     canvas.setPointerCapture(event.pointerId);
+    const vertexPosition = new THREE.Vector3().fromBufferAttribute(bridge.positions, vertex);
+    bridge.mesh.localToWorld(vertexPosition);
+    pulledMarker.position.copy(vertexPosition);
+    pulledMarker.visible = forceMarker.checked;
+    pullStatus.textContent = `Pulling vertex ${vertex}`;
+    event.preventDefault();
   });
   canvas.addEventListener('pointermove', (event) => {
     if (!draggingBridge || event.pointerId !== activePointerId) return;
-    const bounds = canvas.getBoundingClientRect();
-    const normalizedX = ((event.clientX - bounds.left) / bounds.width - 0.5) * 2;
-    module._vegafem_web_set_force(simulation, normalizedX * Number(forceScale.value));
+    const forceX = event.clientX - dragStart.x;
+    const forceY = dragStart.y - event.clientY;
+    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    worldForce.copy(cameraRight).multiplyScalar(forceX).addScaledVector(cameraUp, forceY);
+    module._vegafem_web_set_pull(simulation, pulledVertex, worldForce.x, worldForce.y, worldForce.z);
+    const magnitude = worldForce.length();
+    if (magnitude > 0.1) {
+      pullArrow.position.copy(pulledMarker.position);
+      pullArrow.setDirection(worldForce.clone().normalize());
+      pullArrow.setLength(Math.min(3.0, 0.018 * magnitude), 0.25, 0.14);
+      pullArrow.visible = forceMarker.checked;
+    }
+    pullStatus.textContent = `Pulling vertex ${pulledVertex} · ${magnitude.toFixed(0)} px`;
   });
   function releasePointer(event) {
     if (event.pointerId !== activePointerId) return;
-    draggingBridge = false;
-    activePointerId = null;
-    controls.enabled = true;
-    module._vegafem_web_set_force(simulation, 0);
+    clearPull();
   }
   canvas.addEventListener('pointerup', releasePointer);
   canvas.addEventListener('pointercancel', releasePointer);
@@ -226,7 +339,7 @@ async function main() {
   let previousTime = performance.now();
   let frame = 0;
   renderer.setAnimationLoop((now) => {
-    const deltaSeconds = Math.min((now - previousTime) / 1000, 0.05);
+    const deltaSeconds = Math.max(0, Math.min((now - previousTime) / 1000, 0.05));
     previousTime = now;
     if (running) module._vegafem_web_step(simulation, deltaSeconds);
     module._vegafem_web_deformed_positions(simulation);
