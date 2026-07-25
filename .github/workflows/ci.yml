@@ -179,7 +179,9 @@ jobs:
             | while read -r library; do cp -L "$library" modern-backend-bundle/runtime-libs/; done
           find /opt/intel/oneapi/compiler/2026.1/lib -maxdepth 1 -type f \
             \( -name 'libsycl.so*' -o -name 'libur_*.so*' -o -name 'libpi_*.so*' \
-               -o -name 'libOpenCL.so*' -o -name 'libintelocl.so*' \) \
+               -o -name 'libOpenCL.so*' -o -name 'libintelocl.so*' \
+               -o -name 'libtbb.so*' -o -name 'libumf.so*' \
+               -o -name 'libur_adapter_native_cpu.so*' \) \
             -exec cp -L {} modern-backend-bundle/runtime-libs/ \;
 
       - name: Upload modern backend bundle
