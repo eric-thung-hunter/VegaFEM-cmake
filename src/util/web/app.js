@@ -15,6 +15,18 @@ let running = true;
 let draggingBridge = false;
 let activePointerId = null;
 
+function supportsWasmSimd() {
+  // i8x16.splat is a small, side-effect-free SIMD feature probe. Validation
+  // (rather than user-agent sniffing) lets Safari versions choose safely.
+  const probe = new Uint8Array([
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+    0x03, 0x02, 0x01, 0x00,
+    0x0a, 0x09, 0x01, 0x07, 0x00, 0x41, 0x00, 0xfd, 0x0f, 0x1a, 0x0b
+  ]);
+  return WebAssembly.validate(probe);
+}
+
 function showFailure(error) {
   console.error(error);
   failure.hidden = false;
@@ -137,7 +149,8 @@ async function main() {
   scene.add(floor);
 
   const bridge = createBridge(scene);
-  const wasmImport = await import('./vegafem-web-sim.js');
+  const simd = supportsWasmSimd();
+  const wasmImport = await import(simd ? './vegafem-web-sim-simd.js' : './vegafem-web-sim.js');
   const module = await wasmImport.default({
     locateFile: (file) => new URL(file, import.meta.url).href
   });
@@ -145,6 +158,7 @@ async function main() {
   const modeCount = module._vegafem_web_mode_count();
   const statePointer = module._vegafem_web_modal_state(simulation);
   const q = module.HEAPF64.subarray(statePointer >> 3, (statePointer >> 3) + modeCount);
+  status.textContent += simd ? ' · SIMD solver' : ' · baseline solver';
 
   forceScale.addEventListener('input', () => { forceValue.value = forceScale.value; });
   pauseButton.addEventListener('click', () => {

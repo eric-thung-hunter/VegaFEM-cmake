@@ -31,23 +31,36 @@ configure_file(index.html "${VEGAFEM_WEB_OUTPUT_DIR}/index.html" COPYONLY)
 configure_file(app.js "${VEGAFEM_WEB_OUTPUT_DIR}/app.js" COPYONLY)
 configure_file(style.css "${VEGAFEM_WEB_OUTPUT_DIR}/style.css" COPYONLY)
 
-add_executable(vegafem_web_sim webBridge.cpp)
-set_target_properties(vegafem_web_sim PROPERTIES
-  OUTPUT_NAME "vegafem-web-sim"
-  RUNTIME_OUTPUT_DIRECTORY "${VEGAFEM_WEB_OUTPUT_DIR}")
-target_compile_features(vegafem_web_sim PRIVATE cxx_std_11)
-target_compile_options(vegafem_web_sim PRIVATE -O3)
-target_link_options(vegafem_web_sim PRIVATE
-  -O3
-  --no-entry
-  -sMODULARIZE=1
-  -sEXPORT_ES6=1
-  -sENVIRONMENT=web
-  -sFILESYSTEM=0
-  -sALLOW_MEMORY_GROWTH=0
-  -sINITIAL_MEMORY=33554432
-  "-sEXPORTED_FUNCTIONS=['_vegafem_web_create','_vegafem_web_reset','_vegafem_web_step','_vegafem_web_set_force','_vegafem_web_modal_state','_vegafem_web_mode_count']")
+function(vegafem_add_web_solver target output_name use_simd)
+  add_executable(${target} webBridge.cpp)
+  set_target_properties(${target} PROPERTIES
+    OUTPUT_NAME "${output_name}"
+    RUNTIME_OUTPUT_DIRECTORY "${VEGAFEM_WEB_OUTPUT_DIR}")
+  target_compile_features(${target} PRIVATE cxx_std_11)
+  target_compile_options(${target} PRIVATE -O3 -flto)
+  target_link_options(${target} PRIVATE
+    -O3
+    -flto
+    --no-entry
+    -sMODULARIZE=1
+    -sEXPORT_ES6=1
+    -sENVIRONMENT=web
+    -sFILESYSTEM=0
+    -sALLOW_MEMORY_GROWTH=0
+    -sINITIAL_MEMORY=33554432
+    "-sEXPORTED_FUNCTIONS=['_vegafem_web_create','_vegafem_web_reset','_vegafem_web_step','_vegafem_web_set_force','_vegafem_web_modal_state','_vegafem_web_mode_count']")
+  if(use_simd)
+    target_compile_options(${target} PRIVATE -msimd128)
+    target_link_options(${target} PRIVATE -msimd128)
+  endif()
+endfunction()
+
+# Every deployment carries the broad WebAssembly baseline and an auto-vectorized
+# variant. app.js validates SIMD before it chooses the latter, so older Safari
+# versions still receive a working solver instead of a Wasm validation error.
+vegafem_add_web_solver(vegafem_web_sim "vegafem-web-sim" FALSE)
+vegafem_add_web_solver(vegafem_web_simd "vegafem-web-sim-simd" TRUE)
 
 # A named aggregate makes `cmake --build ... --target vegafem_web_demo` the
 # stable public command even if the implementation target changes later.
-add_custom_target(vegafem_web_demo DEPENDS vegafem_web_sim)
+add_custom_target(vegafem_web_demo DEPENDS vegafem_web_sim vegafem_web_simd)

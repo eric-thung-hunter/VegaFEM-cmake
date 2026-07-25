@@ -158,6 +158,8 @@ jobs:
           test -s build-web/web/app.js
           test -s build-web/web/vegafem-web-sim.js
           test -s build-web/web/vegafem-web-sim.wasm
+          test -s build-web/web/vegafem-web-sim-simd.js
+          test -s build-web/web/vegafem-web-sim-simd.wasm
           test -s build-web/web/three.module.js
           test -s build-web/web/three.webgpu.js
           grep -F "WebGL2 fallback" build-web/web/app.js

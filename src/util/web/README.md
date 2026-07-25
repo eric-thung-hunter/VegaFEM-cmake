@@ -44,7 +44,8 @@ The compatibility contract is intentionally conservative:
 
 * WebAssembly plus WebGL2 is the required rendering baseline.
 * The shipped solver has no pthreads, `SharedArrayBuffer`, COOP/COEP headers,
-  or WebGPU requirement.
+  or WebGPU requirement. The page feature-detects Wasm SIMD and chooses the
+  LTO/SIMD artifact when available; otherwise it loads the baseline artifact.
 * One-finger dragging applies force; two-finger interaction remains available
   for the Three.js orbit controls. The canvas disables browser gesture handling
   only while interacting with the simulation.
