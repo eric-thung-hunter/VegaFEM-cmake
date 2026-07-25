@@ -5,11 +5,10 @@
 # This file contains the top level CMakeLists.txt logic for the
 # Vega FEM software package.
 
+# Minimum required version of CMake
+cmake_minimum_required(VERSION 3.5)
 project(VegaFEM)
 set(VegaFEM_VERSION 2.0)
-
-# Minimum required version of CMake
-cmake_minimum_required(VERSION 2.8)
 if(COMMAND CMAKE_POLICY)
   cmake_policy(SET CMP0003 NEW)
   if (POLICY CMP0022)

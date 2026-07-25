@@ -400,11 +400,9 @@ inline std::ostream &operator << (std::ostream &s, const Mat3d &v)
   double a10 = v.elt[1][0]; double a11 = v.elt[1][1]; double a12 = v.elt[1][2];
   double a20 = v.elt[2][0]; double a21 = v.elt[2][1]; double a22 = v.elt[2][2];
 
-  return(
-    s << '[' << a00 << ' ' << a01 << ' ' << a02 << ']' << std::endl <<
-    s << '[' << a10 << ' ' << a11 << ' ' << a12 << ']' << std::endl <<
-    s << '[' << a20 << ' ' << a21 << ' ' << a22 << ']'
-  );
+  return s << '[' << a00 << ' ' << a01 << ' ' << a02 << "]\n"
+           << '[' << a10 << ' ' << a11 << ' ' << a12 << "]\n"
+           << '[' << a20 << ' ' << a21 << ' ' << a22 << ']';
 }
 
 inline void Mat3d::print()
@@ -419,4 +417,3 @@ inline void Mat3d::print()
 }
 
 #endif
-

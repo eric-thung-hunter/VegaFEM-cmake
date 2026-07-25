@@ -21,6 +21,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
