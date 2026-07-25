@@ -54,6 +54,7 @@ function(vegafem_add_web_solver target output_name use_simd)
     -sFILESYSTEM=0
     -sALLOW_MEMORY_GROWTH=0
     -sINITIAL_MEMORY=33554432
+    "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPF32','HEAPF64']"
     "-sEXPORTED_FUNCTIONS=['_vegafem_web_create','_vegafem_web_reset','_vegafem_web_step','_vegafem_web_set_force','_vegafem_web_modal_state','_vegafem_web_mode_count','_vegafem_web_set_modal_basis','_vegafem_web_set_stvk_cubic_polynomial','_vegafem_web_deformed_positions','_malloc','_free']")
   if(use_simd)
     target_compile_options(${target} PRIVATE -msimd128)
