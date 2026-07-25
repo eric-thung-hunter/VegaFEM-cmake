@@ -16,8 +16,8 @@
         <p class="hint">Left-drag anywhere in the scene to pull the closest bridge vertex. Right-drag orbits; wheel zooms.</p>
         <p id="pull-status" class="pull-status">Pick a bridge member to apply force</p>
 
-        <label for="compliance">Pull strength <output id="compliance-value">100</output></label>
-        <input id="compliance" type="range" min="10" max="1000" step="10" value="100" inputmode="numeric">
+        <label for="compliance">Compliance <output id="compliance-value">33605</output></label>
+        <input id="compliance" type="range" min="1000" max="50000" step="100" value="33605" inputmode="numeric">
 
         <label for="frequency">Frequency scaling <output id="frequency-value">0.25</output></label>
         <input id="frequency" type="range" min="0.05" max="1" step="0.01" value="0.25" inputmode="decimal">
@@ -26,7 +26,7 @@
           <summary>Integrator</summary>
           <label class="toggle"><input id="linear-model" type="checkbox"> Linear reduced model</label>
           <label class="toggle"><input id="static-only" type="checkbox"> Static relaxation</label>
-          <p class="control-note">Stable microsteps approximate the native implicit Newmark path in this portable Wasm build.</p>
+          <p class="control-note">Native Bridge implicit Newmark path: beta 0.25, gamma 0.5, five substeps.</p>
         </details>
         <details open>
           <summary>Damping</summary>

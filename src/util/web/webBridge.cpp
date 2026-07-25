@@ -19,22 +19,20 @@ constexpr std::size_t kModeCount = 20;
 struct ReducedSimulation
 {
   std::array<double, kModeCount> q{};
-  std::array<double, kModeCount> qdot{};
+  std::array<double, kModeCount> qvel{};
+  std::array<double, kModeCount> qaccel{};
   std::vector<float> renderingBasis;
   std::vector<float> deformedPositions;
   std::vector<double> linearCoefficients;
   std::vector<double> quadraticCoefficients;
   std::vector<double> cubicCoefficients;
-  std::array<double, kModeCount * (kModeCount + 1) / 2> qiqj{};
   int renderingRows = 0;
   int quadraticSize = 0;
   int cubicSize = 0;
   int pulledVertex = -1;
   std::array<double, 3> pullVector{};
-  // This is deliberately normalized for the browser's explicit microstep
-  // integrator. The native 33605.2 scene value is paired with implicit
-  // Newmark; applying it directly here would make a pointer drag unstable.
-  double compliance = 100.0;
+  // Values below match realtime/simpleBridge/simpleBridge.config.
+  double compliance = 33605.2;
   double baseFrequency = 0.25;
   double massDamping = 0.0;
   double stiffnessDamping = 0.003;
@@ -44,7 +42,8 @@ struct ReducedSimulation
   void reset()
   {
     q.fill(0.0);
-    qdot.fill(0.0);
+    qvel.fill(0.0);
+    qaccel.fill(0.0);
     pulledVertex = -1;
     pullVector.fill(0.0);
   }
@@ -100,47 +99,92 @@ struct ReducedSimulation
     return true;
   }
 
-  void evaluateStVKInternalForces(const std::array<double, kModeCount> & state,
-    std::array<double, kModeCount> & forces, bool includeNonlinear)
+  void evaluateStVKForceAndTangent(const std::array<double, kModeCount> & state,
+    std::array<double, kModeCount> & forces,
+    std::array<double, kModeCount * kModeCount> & tangent, bool includeNonlinear)
   {
     forces.fill(0.0);
+    tangent.fill(0.0);
     if (linearCoefficients.empty())
       return;
 
     for (std::size_t output = 0; output < kModeCount; ++output)
       for (std::size_t input = 0; input < kModeCount; ++input)
+      {
         forces[output] += linearCoefficients[output * kModeCount + input] * state[input];
+        tangent[output * kModeCount + input] += linearCoefficients[output * kModeCount + input];
+      }
 
     if (!includeNonlinear)
       return;
 
-    std::size_t qiqjIndex = 0;
+    int quadraticIndex = 0;
     for (std::size_t i = 0; i < kModeCount; ++i)
       for (std::size_t j = i; j < kModeCount; ++j)
-        qiqj[qiqjIndex++] = state[i] * state[j];
-
-    for (std::size_t output = 0; output < kModeCount; ++output)
-      for (int index = 0; index < quadraticSize; ++index)
-        forces[output] += quadraticCoefficients[output * quadraticSize + index] * qiqj[static_cast<std::size_t>(index)];
-
-    int qiqjOffset = 0;
-    int cubicOffset = 0;
-    int size = quadraticSize;
-    for (std::size_t i = 0; i < kModeCount; ++i)
-    {
-      for (std::size_t output = 0; output < kModeCount; ++output)
       {
-        double contribution = 0.0;
-        const std::size_t coefficientOffset = output * cubicSize + cubicOffset;
-        for (int index = 0; index < size; ++index)
-          contribution += cubicCoefficients[coefficientOffset + index] * qiqj[static_cast<std::size_t>(qiqjOffset + index)];
-        forces[output] += state[i] * contribution;
+        for (std::size_t output = 0; output < kModeCount; ++output)
+        {
+          const double coefficient = quadraticCoefficients[output * quadraticSize + quadraticIndex];
+          forces[output] += coefficient * state[i] * state[j];
+          tangent[output * kModeCount + i] += coefficient * state[j];
+          tangent[output * kModeCount + j] += coefficient * state[i];
+        }
+        ++quadraticIndex;
       }
-      const int remaining = static_cast<int>(kModeCount - i);
-      size -= remaining;
-      qiqjOffset += remaining;
-      cubicOffset += remaining * (remaining + 1) / 2;
+
+    int cubicIndex = 0;
+    for (std::size_t i = 0; i < kModeCount; ++i)
+      for (std::size_t j = i; j < kModeCount; ++j)
+        for (std::size_t k = j; k < kModeCount; ++k)
+        {
+          for (std::size_t output = 0; output < kModeCount; ++output)
+          {
+            const double coefficient = cubicCoefficients[output * cubicSize + cubicIndex];
+            forces[output] += coefficient * state[i] * state[j] * state[k];
+            tangent[output * kModeCount + i] += coefficient * state[j] * state[k];
+            tangent[output * kModeCount + j] += coefficient * state[i] * state[k];
+            tangent[output * kModeCount + k] += coefficient * state[i] * state[j];
+          }
+          ++cubicIndex;
+        }
+  }
+
+  bool solveDenseSystem(std::array<double, kModeCount * kModeCount> matrix,
+    std::array<double, kModeCount> & rightHandSide)
+  {
+    // The native implementation calls LAPACK DPOSV on this 20x20 effective
+    // Newmark matrix. Partial-pivot Gaussian elimination gives the same dense
+    // solve here without making the Safari Wasm baseline depend on LAPACK.
+    for (std::size_t column = 0; column < kModeCount; ++column)
+    {
+      std::size_t pivot = column;
+      for (std::size_t row = column + 1; row < kModeCount; ++row)
+        if (std::abs(matrix[row * kModeCount + column]) > std::abs(matrix[pivot * kModeCount + column]))
+          pivot = row;
+      if (std::abs(matrix[pivot * kModeCount + column]) < 1e-12)
+        return false;
+      if (pivot != column)
+      {
+        for (std::size_t entry = column; entry < kModeCount; ++entry)
+          std::swap(matrix[column * kModeCount + entry], matrix[pivot * kModeCount + entry]);
+        std::swap(rightHandSide[column], rightHandSide[pivot]);
+      }
+      for (std::size_t row = column + 1; row < kModeCount; ++row)
+      {
+        const double factor = matrix[row * kModeCount + column] / matrix[column * kModeCount + column];
+        for (std::size_t entry = column + 1; entry < kModeCount; ++entry)
+          matrix[row * kModeCount + entry] -= factor * matrix[column * kModeCount + entry];
+        rightHandSide[row] -= factor * rightHandSide[column];
+      }
     }
+    for (int row = static_cast<int>(kModeCount) - 1; row >= 0; --row)
+    {
+      double sum = rightHandSide[static_cast<std::size_t>(row)];
+      for (std::size_t column = static_cast<std::size_t>(row) + 1; column < kModeCount; ++column)
+        sum -= matrix[static_cast<std::size_t>(row) * kModeCount + column] * rightHandSide[column];
+      rightHandSide[static_cast<std::size_t>(row)] = sum / matrix[static_cast<std::size_t>(row) * kModeCount + static_cast<std::size_t>(row)];
+    }
+    return true;
   }
 
   const float * assembleRenderingDisplacements()
@@ -163,66 +207,91 @@ struct ReducedSimulation
 
   void step(double frameDeltaSeconds)
   {
-    // Bound work per browser frame. Larger gaps (for example after a mobile
-    // tab resumes) are integrated in fixed microsteps instead of destabilizing
-    // the reduced state in one large Euler step.
+    // Match the native idle routine: one graphics-frame timestep divided into
+    // the five simpleBridge.config substeps, using beta=.25 and gamma=.5.
     const double clampedDelta = std::max(0.0, std::min(frameDeltaSeconds, 0.05));
-    // The native demo uses implicit Newmark.  This compact browser kernel uses
-    // semi-implicit Euler, so it takes sufficiently small microsteps to keep
-    // the stiff Bridge polynomial stable while a user pulls on a vertex.
-    const int substeps = std::max(1, static_cast<int>(std::ceil(clampedDelta / (1.0 / 1200.0))));
+    const int substeps = 5;
     const double dt = clampedDelta / static_cast<double>(substeps);
+    if (dt == 0.0 || linearCoefficients.empty())
+      return;
 
     for (int substep = 0; substep < substeps; ++substep)
     {
-      if (!linearCoefficients.empty())
+      std::array<double, kModeCount> externalForces{};
+      if (pulledVertex >= 0 && 3 * pulledVertex + 2 < renderingRows)
       {
-        std::array<double, kModeCount> internalForces;
-        std::array<double, kModeCount> externalForces{};
-        evaluateStVKInternalForces(q, internalForces, !useLinearModel);
-
-        // This is ModalMatrix::ProjectSingleVertex from the native driver:
-        // fq = U_vertex^T * (compliance * screen-space pull direction).
-        if (pulledVertex >= 0 && 3 * pulledVertex + 2 < renderingRows)
-        {
-          const int row = 3 * pulledVertex;
-          for (std::size_t mode = 0; mode < kModeCount; ++mode)
-          {
-            const std::size_t offset = static_cast<std::size_t>(row) + mode * renderingRows;
-            externalForces[mode] = compliance * (
-              static_cast<double>(renderingBasis[offset]) * pullVector[0] +
-              static_cast<double>(renderingBasis[offset + 1]) * pullVector[1] +
-              static_cast<double>(renderingBasis[offset + 2]) * pullVector[2]);
-          }
-        }
+        const int row = 3 * pulledVertex;
         for (std::size_t mode = 0; mode < kModeCount; ++mode)
         {
-          const double acceleration = externalForces[mode] - baseFrequency * baseFrequency * internalForces[mode] -
-            // Native uses implicit Newmark for the K*qdot Rayleigh term.  An
-            // explicit version is unstable for this stiff Bridge polynomial,
-            // so retain the user-facing coefficient as a stable modal-drag
-            // approximation in the portable browser integrator.
-            (massDamping + 30.0 * stiffnessDamping) * qdot[mode];
-          qdot[mode] += dt * acceleration;
-          if (staticOnly)
-            qdot[mode] *= 0.08;
-          q[mode] += dt * qdot[mode];
-        }
-      }
-      else
-      {
-        // Safe fallback while the asynchronous browser asset load is pending.
-        for (std::size_t mode = 0; mode < kModeCount; ++mode)
-        {
-          const double frequency = 5.0 + static_cast<double>(mode + 1) * 1.65;
-          qdot[mode] += dt * (-frequency * frequency * q[mode]);
-          q[mode] += dt * qdot[mode];
+          const std::size_t offset = static_cast<std::size_t>(row) + mode * renderingRows;
+          externalForces[mode] = compliance * (
+            static_cast<double>(renderingBasis[offset]) * pullVector[0] +
+            static_cast<double>(renderingBasis[offset + 1]) * pullVector[1] +
+            static_cast<double>(renderingBasis[offset + 2]) * pullVector[2]);
         }
       }
 
+      const std::array<double, kModeCount> qPrevious = q;
+      const std::array<double, kModeCount> qvelPrevious = qvel;
+      const std::array<double, kModeCount> qaccelPrevious = qaccel;
+      const double beta = 0.25;
+      const double gamma = 0.5;
+      const double alpha1 = 1.0 / (beta * dt * dt);
+      const double alpha2 = 1.0 / (beta * dt);
+      const double alpha3 = (1.0 - 2.0 * beta) / (2.0 * beta);
+      const double alpha4 = gamma / (beta * dt);
+      const double alpha5 = 1.0 - gamma / beta;
+      const double alpha6 = (1.0 - gamma / (2.0 * beta)) * dt;
+
+      // This is the initial guess and first (the native default is one)
+      // Newton iteration from ImplicitNewmarkDense::DoTimestep.
       for (std::size_t mode = 0; mode < kModeCount; ++mode)
       {
-        if (!std::isfinite(q[mode]) || std::abs(q[mode]) > 20.0)
+        qaccel[mode] = -alpha2 * qvelPrevious[mode] - alpha3 * qaccelPrevious[mode];
+        qvel[mode] = alpha5 * qvelPrevious[mode] + alpha6 * qaccelPrevious[mode];
+      }
+
+      std::array<double, kModeCount> internalForces;
+      std::array<double, kModeCount * kModeCount> tangent;
+      evaluateStVKForceAndTangent(q, internalForces, tangent, !useLinearModel);
+      const double internalScale = baseFrequency * baseFrequency;
+      for (std::size_t entry = 0; entry < tangent.size(); ++entry)
+        tangent[entry] *= internalScale;
+      for (std::size_t mode = 0; mode < kModeCount; ++mode)
+        internalForces[mode] *= internalScale;
+
+      std::array<double, kModeCount * kModeCount> effectiveStiffness = tangent;
+      std::array<double, kModeCount> residual{};
+      for (std::size_t row = 0; row < kModeCount; ++row)
+      {
+        double dampingVelocity = 0.0;
+        for (std::size_t column = 0; column < kModeCount; ++column)
+        {
+          const double damping = (row == column ? massDamping : 0.0) + stiffnessDamping * tangent[row * kModeCount + column];
+          effectiveStiffness[row * kModeCount + column] += alpha4 * damping + (row == column ? alpha1 : 0.0);
+          dampingVelocity += damping * qvel[column];
+        }
+        residual[row] = -(qaccel[row] + dampingVelocity + internalForces[row] - externalForces[row]);
+      }
+
+      if (staticOnly)
+      {
+        effectiveStiffness = tangent;
+        for (std::size_t mode = 0; mode < kModeCount; ++mode)
+          residual[mode] = externalForces[mode] - internalForces[mode];
+      }
+
+      if (!solveDenseSystem(effectiveStiffness, residual))
+      {
+        reset();
+        break;
+      }
+      for (std::size_t mode = 0; mode < kModeCount; ++mode)
+      {
+        q[mode] += residual[mode];
+        qaccel[mode] = alpha1 * (q[mode] - qPrevious[mode]) - alpha2 * qvelPrevious[mode] - alpha3 * qaccelPrevious[mode];
+        qvel[mode] = alpha4 * (q[mode] - qPrevious[mode]) + alpha5 * qvelPrevious[mode] + alpha6 * qaccelPrevious[mode];
+        if (!std::isfinite(q[mode]) || !std::isfinite(qvel[mode]) || std::abs(q[mode]) > 1e6)
         {
           reset();
           break;
@@ -276,7 +345,7 @@ void vegafem_web_set_parameter(void *, int parameter, double value)
 {
   switch (parameter)
   {
-    case 0: g_simulation.compliance = std::max(0.0, std::min(value, 2000.0)); break;
+    case 0: g_simulation.compliance = std::max(0.0, std::min(value, 100000.0)); break;
     case 1: g_simulation.baseFrequency = std::max(0.0, std::min(value, 2.0)); break;
     case 2: g_simulation.massDamping = std::max(0.0, std::min(value, 10.0)); break;
     case 3: g_simulation.stiffnessDamping = std::max(0.0, std::min(value, 0.1)); break;
