@@ -16,8 +16,8 @@ let draggingBridge = false;
 let activePointerId = null;
 
 function supportsWasmSimd() {
-  // i8x16.splat is a small, side-effect-free SIMD feature probe. Validation
-  // (rather than user-agent sniffing) lets Safari versions choose safely.
+  // i8x16.splat is a minimal feature probe; validate capabilities instead of
+  // guessing from an iOS/Safari user-agent string.
   const probe = new Uint8Array([
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
     0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
@@ -34,9 +34,8 @@ function showFailure(error) {
 }
 
 async function createRenderer() {
-  // WebGPURenderer selects WebGPU where it exists and uses a WebGL2 backend
-  // otherwise. If initialisation itself fails, use the established WebGL2
-  // renderer directly. This keeps iOS Safari on the supported baseline.
+  // Three chooses WebGPU where it exists and its WebGL2 backend otherwise. A
+  // direct WebGL renderer is retained for devices where renderer setup fails.
   try {
     const renderer = new WebGPURenderer({ canvas, antialias: !matchMedia('(pointer: coarse)').matches });
     await renderer.init();
@@ -44,76 +43,82 @@ async function createRenderer() {
     status.textContent = `${backend} renderer · CPU Wasm solver`;
     return renderer;
   } catch (error) {
-    console.warn('WebGPU renderer initialisation failed; using WebGL2.', error);
+    console.warn('WebGPU renderer initialisation failed; using WebGL.', error);
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: !matchMedia('(pointer: coarse)').matches });
     status.textContent = 'WebGL2 fallback renderer · CPU Wasm solver';
     return renderer;
   }
 }
 
-function createBridge(scene) {
-  const geometry = new THREE.PlaneGeometry(5.8, 0.9, 72, 14);
-  const positions = geometry.attributes.position;
-  const rest = positions.array.slice();
-  positions.setUsage(THREE.DynamicDrawUsage);
+function parseObjMesh(text) {
+  const vertices = [];
+  const indices = [];
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts[0] === 'v' && parts.length >= 4) {
+      vertices.push(Number(parts[1]), Number(parts[2]), Number(parts[3]));
+    } else if (parts[0] === 'f' && parts.length >= 4) {
+      const face = parts.slice(1).map((entry) => {
+        const rawIndex = Number(entry.split('/')[0]);
+        return rawIndex < 0 ? vertices.length / 3 + rawIndex : rawIndex - 1;
+      });
+      for (let index = 1; index + 1 < face.length; ++index) indices.push(face[0], face[index], face[index + 1]);
+    }
+  }
+  if (vertices.length === 0 || indices.length === 0) throw new Error('Bridge OBJ contains no renderable geometry.');
 
+  const geometry = new THREE.BufferGeometry();
+  const positions = new THREE.Float32BufferAttribute(vertices, 3).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('position', positions);
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return { geometry, positions, rest: positions.array.slice() };
+}
+
+async function loadBridgeAssets() {
+  const [objResponse, modesResponse] = await Promise.all([
+    fetch('./assets/simpleBridge.obj'),
+    fetch('./assets/simpleBridge.URendering.float')
+  ]);
+  if (!objResponse.ok || !modesResponse.ok) throw new Error('Unable to fetch the simpleBridge rendering assets.');
+
+  const bridge = parseObjMesh(await objResponse.text());
+  const buffer = await modesResponse.arrayBuffer();
+  if (buffer.byteLength < 8) throw new Error('The modal matrix file is truncated.');
+  const header = new DataView(buffer);
+  const rows = header.getInt32(0, true);
+  const modes = header.getInt32(4, true);
+  const expectedBytes = 8 + rows * modes * Float32Array.BYTES_PER_ELEMENT;
+  if (rows !== bridge.rest.length || expectedBytes !== buffer.byteLength) {
+    throw new Error(`Modal matrix dimensions (${rows} × ${modes}) do not match the Bridge mesh.`);
+  }
+  return { ...bridge, rows, modes, basis: new Float32Array(buffer, 8, rows * modes) };
+}
+
+function createBridge(scene, data) {
   const bridge = new THREE.Mesh(
-    geometry,
+    data.geometry,
     new THREE.MeshStandardMaterial({ color: 0x4e97c7, metalness: 0.2, roughness: 0.55, side: THREE.DoubleSide })
   );
   bridge.castShadow = true;
   bridge.receiveShadow = true;
+  bridge.add(new THREE.Mesh(
+    data.geometry,
+    new THREE.MeshBasicMaterial({ color: 0xd0ebfc, wireframe: true, transparent: true, opacity: 0.18 })
+  ));
   scene.add(bridge);
-
-  const wire = new THREE.LineSegments(
-    new THREE.WireframeGeometry(geometry),
-    new THREE.LineBasicMaterial({ color: 0xd0ebfc, transparent: true, opacity: 0.36 })
-  );
-  bridge.add(wire);
-
-  const supportMaterial = new THREE.MeshStandardMaterial({ color: 0x344553, roughness: 0.8 });
-  for (const x of [-2.65, -1.95, 1.95, 2.65]) {
-    const support = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.45, 0.32), supportMaterial);
-    support.position.set(x, -1.05, 0);
-    support.castShadow = true;
-    support.receiveShadow = true;
-    scene.add(support);
-  }
-
-  return { geometry, positions, rest, wire };
+  return data;
 }
 
-function applyModalDeformation(bridge, q) {
-  const position = bridge.positions.array;
-  for (let offset = 0; offset < position.length; offset += 3) {
-    const x = bridge.rest[offset];
-    const y = bridge.rest[offset + 1];
-    const x01 = (x + 2.9) / 5.8;
-    const edgeWeight = Math.max(0, 1 - Math.abs(y) / 0.45);
-    let vertical = 0;
-    let depth = 0;
-
-    for (let mode = 0; mode < q.length; ++mode) {
-      const wave = Math.sin((mode % 4 + 1) * Math.PI * x01);
-      const width = mode % 3 === 0 ? 1 : Math.cos((mode % 3) * Math.PI * y / 0.9);
-      vertical += q[mode] * wave * width * (mode % 2 ? 0.02 : 0.045);
-      depth += q[mode] * wave * edgeWeight * (mode % 2 ? 0.038 : 0.012);
-    }
-
-    position[offset] = x;
-    position[offset + 1] = y + vertical;
-    position[offset + 2] = depth;
-  }
+function applyModalDeformation(bridge, displacement, updateNormals) {
+  const positions = bridge.positions.array;
+  for (let offset = 0; offset < positions.length; ++offset) positions[offset] = bridge.rest[offset] + displacement[offset];
   bridge.positions.needsUpdate = true;
-  bridge.geometry.computeVertexNormals();
-  bridge.wire.geometry.dispose();
-  bridge.wire.geometry = new THREE.WireframeGeometry(bridge.geometry);
+  if (updateNormals) bridge.geometry.computeVertexNormals();
 }
 
 async function main() {
-  if (!window.WebAssembly) {
-    throw new Error('This browser does not provide WebAssembly.');
-  }
+  if (!window.WebAssembly) throw new Error('This browser does not provide WebAssembly.');
 
   const renderer = await createRenderer();
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -122,42 +127,50 @@ async function main() {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x10151c);
-  scene.fog = new THREE.Fog(0x10151c, 7, 15);
+  scene.fog = new THREE.Fog(0x10151c, 19, 45);
 
   const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
-  camera.position.set(0, 1.1, 7.2);
+  camera.position.set(0, 6.2, 24.8);
   const controls = new OrbitControls(camera, canvas);
-  controls.target.set(0, -0.1, 0);
+  controls.target.set(0, 1.2, 0);
   controls.enableDamping = true;
   controls.enablePan = false;
-  controls.minDistance = 4.5;
-  controls.maxDistance = 12;
+  controls.minDistance = 12;
+  controls.maxDistance = 38;
   controls.update();
 
   scene.add(new THREE.HemisphereLight(0xc7eaff, 0x24313a, 2.2));
   const key = new THREE.DirectionalLight(0xffffff, 2.8);
-  key.position.set(3, 5, 4);
+  key.position.set(3, 8, 7);
   key.castShadow = true;
   scene.add(key);
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(30, 30),
+    new THREE.PlaneGeometry(60, 60),
     new THREE.MeshStandardMaterial({ color: 0x18232c, roughness: 1 })
   );
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -1.78;
+  floor.position.y = -0.08;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  const bridge = createBridge(scene);
+  status.textContent = 'Loading reduced Bridge assets…';
+  const bridge = createBridge(scene, await loadBridgeAssets());
   const simd = supportsWasmSimd();
   const wasmImport = await import(simd ? './vegafem-web-sim-simd.js' : './vegafem-web-sim.js');
-  const module = await wasmImport.default({
-    locateFile: (file) => new URL(file, import.meta.url).href
-  });
+  const module = await wasmImport.default({ locateFile: (file) => new URL(file, import.meta.url).href });
   const simulation = module._vegafem_web_create();
   const modeCount = module._vegafem_web_mode_count();
-  const statePointer = module._vegafem_web_modal_state(simulation);
-  const q = module.HEAPF64.subarray(statePointer >> 3, (statePointer >> 3) + modeCount);
+  if (bridge.modes !== modeCount) throw new Error(`Bridge requires ${bridge.modes} modes, but the solver exports ${modeCount}.`);
+
+  const basisPointer = module._malloc(bridge.basis.byteLength);
+  module.HEAPF32.set(bridge.basis, basisPointer >> 2);
+  const basisStatus = module._vegafem_web_set_modal_basis(simulation, basisPointer, bridge.rows, bridge.modes);
+  module._free(basisPointer);
+  if (basisStatus !== 0) throw new Error('The WebAssembly solver rejected the Bridge modal matrix.');
+
+  const displacementPointer = module._vegafem_web_deformed_positions(simulation);
+  if (!displacementPointer) throw new Error('The WebAssembly solver could not assemble Bridge displacements.');
+  const displacement = module.HEAPF32.subarray(displacementPointer >> 2, (displacementPointer >> 2) + bridge.rows);
   status.textContent += simd ? ' · SIMD solver' : ' · baseline solver';
 
   forceScale.addEventListener('input', () => { forceValue.value = forceScale.value; });
@@ -198,11 +211,13 @@ async function main() {
   });
 
   let previousTime = performance.now();
+  let frame = 0;
   renderer.setAnimationLoop((now) => {
     const deltaSeconds = Math.min((now - previousTime) / 1000, 0.05);
     previousTime = now;
     if (running) module._vegafem_web_step(simulation, deltaSeconds);
-    applyModalDeformation(bridge, q);
+    module._vegafem_web_deformed_positions(simulation);
+    applyModalDeformation(bridge, displacement, (++frame % 2) === 0);
     controls.update();
     renderer.render(scene, camera);
     frameTime.textContent = `${(deltaSeconds * 1000).toFixed(1)} ms`;

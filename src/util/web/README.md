@@ -10,11 +10,12 @@ separate from the GLUT/ImGui native demo:
   backend when it is not. A direct `WebGLRenderer` fallback is retained if
   renderer initialisation itself fails.
 
-The current bridge is a deterministic 20-mode development kernel. It proves
-the build, input, frame-loop and renderer boundary without coupling the web
-application to GLUT, Cg or native OpenGL. The next porting step is recorded in
-`todo.md`: load the production reduced-StVK data and replace its analytical
-mode shapes with the actual rendering modal matrix.
+The demo ships the native `simpleBridge.obj` mesh and its exact
+`simpleBridge.URendering.float` 48,255 x 20 rendering modal matrix. The Wasm
+core performs the same column-major `u = Uq` assembly used by the native
+`ModalMatrix` path, then Three.js renders the resulting Bridge geometry. The
+current reduced dynamics kernel is intentionally compact; the next porting
+step in `todo.md` is loading the production reduced-StVK force data.
 
 ## Build
 

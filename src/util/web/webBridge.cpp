@@ -1,14 +1,14 @@
-// A compact, allocation-free reduced-state kernel exposed to the browser.
+// A compact reduced-state kernel exposed to the browser.
 //
 // The Web front end consumes only the modal vector q. That is the same data
-// boundary used by VegaFEM reduced simulation: future loaders can replace the
-// analytical demo modes with a model-specific U matrix without changing the
-// JavaScript rendering or input contract.
+// boundary used by VegaFEM reduced simulation: the browser supplies the
+// production rendering modal matrix and this module assembles u = Uq.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <vector>
 
 namespace
 {
@@ -18,6 +18,9 @@ struct ReducedSimulation
 {
   std::array<double, kModeCount> q{};
   std::array<double, kModeCount> qdot{};
+  std::vector<float> renderingBasis;
+  std::vector<float> deformedPositions;
+  int renderingRows = 0;
   double externalForce = 0.0;
 
   void reset()
@@ -25,6 +28,35 @@ struct ReducedSimulation
     q.fill(0.0);
     qdot.fill(0.0);
     externalForce = 0.0;
+  }
+
+  bool setModalBasis(const float * basis, int rows, int modes)
+  {
+    if (basis == nullptr || rows <= 0 || modes != static_cast<int>(kModeCount) || rows % 3 != 0)
+      return false;
+
+    renderingRows = rows;
+    renderingBasis.assign(basis, basis + static_cast<std::size_t>(rows) * kModeCount);
+    deformedPositions.assign(static_cast<std::size_t>(rows), 0.0f);
+    return true;
+  }
+
+  const float * assembleRenderingDisplacements()
+  {
+    if (renderingBasis.empty())
+      return nullptr;
+
+    // VegaFEM matrices are column-major: U[row + mode * rows]. This is the
+    // same U*q operation used by ModalMatrix::AssembleVector in the native
+    // reduced demo, but produces float displacements for the browser mesh.
+    for (int row = 0; row < renderingRows; ++row)
+    {
+      double displacement = 0.0;
+      for (std::size_t mode = 0; mode < kModeCount; ++mode)
+        displacement += static_cast<double>(renderingBasis[row + mode * renderingRows]) * q[mode];
+      deformedPositions[static_cast<std::size_t>(row)] = static_cast<float>(displacement);
+    }
+    return deformedPositions.data();
   }
 
   void step(double frameDeltaSeconds)
@@ -96,5 +128,15 @@ const double * vegafem_web_modal_state(void *)
 int vegafem_web_mode_count()
 {
   return static_cast<int>(kModeCount);
+}
+
+int vegafem_web_set_modal_basis(void *, const float * basis, int rows, int modes)
+{
+  return g_simulation.setModalBasis(basis, rows, modes) ? 0 : 1;
+}
+
+const float * vegafem_web_deformed_positions(void *)
+{
+  return g_simulation.assembleRenderingDisplacements();
 }
 }
