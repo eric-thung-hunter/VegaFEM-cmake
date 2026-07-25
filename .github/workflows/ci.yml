@@ -49,3 +49,12 @@ jobs:
             examples/turtle/model/turtle-volumetric-homogeneous.veg \
             turtle-mass.matrix
           test -s turtle-mass.matrix
+
+      - name: Upload build bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: vegafem-${{ runner.os }}-x64
+          path: |
+            build/bin
+            build/lib
+          if-no-files-found: error
