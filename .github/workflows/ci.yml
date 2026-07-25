@@ -41,3 +41,11 @@ jobs:
 
       - name: Install
         run: cmake --install build --config Release --prefix install
+
+      - name: Linux utility smoke test
+        if: runner.os == 'Linux'
+        run: |
+          ./build/bin/generateMassMatrix \
+            examples/turtle/model/turtle-volumetric-homogeneous.veg \
+            turtle-mass.matrix
+          test -s turtle-mass.matrix
